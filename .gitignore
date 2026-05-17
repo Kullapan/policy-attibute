@@ -1,0 +1,177 @@
+# ════════════════════════════════════════════════════════
+#  PAMS — Policy Attribute Management System
+#  .gitignore  (root — covers backend + frontend + infra)
+# ════════════════════════════════════════════════════════
+
+
+# ── Java / Spring Boot ───────────────────────────────────
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.hs
+hs_err_pid*
+
+# ── Gradle ───────────────────────────────────────────────
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Avoid committing generated Gradle scripts for other OSes
+gradlew.bat.bak
+
+# ── Maven (if ever migrated) ─────────────────────────────
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+
+# ── Spring Boot specific ─────────────────────────────────
+/backend/build/
+/backend/.gradle/
+/backend/out/
+
+# Application secrets — never commit real credentials
+application-local.properties
+application-prod.properties
+application-staging.properties
+*.env
+.env
+.env.*
+!.env.example
+
+# Keys and Certificates — never commit cryptographic materials
+*.pem
+*.key
+*.pub
+*.pkcs12
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Local environment variables
+.env.local
+.env.*.local
+
+# ── Node / npm / Frontend ────────────────────────────────
+node_modules/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/
+/frontend/build/
+
+# npm / yarn / pnpm lock — keep package-lock.json but ignore yarn.lock if not used
+yarn.lock
+pnpm-lock.yaml
+.npm/
+.yarn/
+
+# Vite cache
+.vite/
+
+# TypeScript build output
+*.tsbuildinfo
+dist/
+
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+build_log.txt
+logs/
+log/
+
+
+# ── Docker / Compose ─────────────────────────────────────
+# Keep docker-compose.yml but ignore local overrides
+docker-compose.override.yml
+docker-compose.local.yml
+.docker/
+
+
+# ── pgAdmin ──────────────────────────────────────────────
+pgadmin/sessions/
+pgadmin/*.db
+pgadmin/storage/
+
+
+# ── Database / Flyway ────────────────────────────────────
+*.sql.bak
+flyway.conf
+
+
+# ── IDEs & Editors ───────────────────────────────────────
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Eclipse
+.classpath
+.project
+.settings/
+.factorypath
+
+# NetBeans
+nbproject/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# STS / Spring Tool Suite
+.apt_generated/
+.springBeans
+
+
+# ── Operating System ─────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+
+# ── Testing & Coverage ───────────────────────────────────
+coverage/
+.nyc_output/
+test-results/
+*.lcov
+/backend/src/test/resources/application-test.properties
+
+
+# ── Misc ─────────────────────────────────────────────────
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+.cache/
+tmp/
+temp/

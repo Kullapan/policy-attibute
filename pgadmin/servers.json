@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "PAMS Local",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "pams_db",
+      "Username": "pams_user",
+      "SSLMode": "prefer",
+      "PassFile": ""
+    }
+  }
+}
