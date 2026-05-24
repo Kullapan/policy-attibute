@@ -3,6 +3,27 @@
 export type DataType = 'STRING' | 'NUMBER' | 'DATE' | 'BOOLEAN';
 export type AttributeStatus = 'ACTIVE' | 'ARCHIVED';
 
+export interface AttributeGroup {
+  code: string;
+  displayNameEn: string;
+  displayNameTh: string;
+  displayOrder: number;
+  status: AttributeStatus;
+  version?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
+export interface AttributeGroupForm {
+  code: string;
+  displayNameEn: string;
+  displayNameTh: string;
+  displayOrder: number;
+  status?: AttributeStatus;
+  version?: number;
+}
+
 export interface AttributeMaster {
   code: string;
   displayName: string;
@@ -11,6 +32,7 @@ export interface AttributeMaster {
   isRequired: boolean;
   regexPattern: string | null;
   regexErrorMsg: string | null;
+  groupCode: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -24,6 +46,7 @@ export interface AttributeMasterForm {
   isRequired: boolean;
   regexPattern: string;
   regexErrorMsg: string;
+  groupCode: string;
   version?: number;
 }
 
@@ -36,6 +59,7 @@ export interface PolicyAttributeValue {
   isRequired: boolean;
   regexPattern: string | null;
   regexErrorMsg: string | null;
+  groupCode: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string;

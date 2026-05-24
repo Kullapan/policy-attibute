@@ -3,6 +3,7 @@ package com.example.kk.policyattribute.service
 import com.example.kk.policyattribute.dto.AttributeMasterDto
 import com.example.kk.policyattribute.exception.AttributeValidationException
 import com.example.kk.policyattribute.exception.ResourceNotFoundException
+import com.example.kk.policyattribute.model.AttributeGroup
 import com.example.kk.policyattribute.model.AttributeMaster
 import com.example.kk.policyattribute.model.AttributeStatus
 import com.example.kk.policyattribute.model.DataType
@@ -28,6 +29,7 @@ import java.util.Optional
 class AttributeMasterServiceTest {
 
     @Mock lateinit var repository: AttributeMasterRepository
+    @Mock lateinit var groupRepository: com.example.kk.policyattribute.repository.AttributeGroupRepository
     @InjectMocks lateinit var service: AttributeMasterService
 
     lateinit var active: AttributeMaster
@@ -119,6 +121,24 @@ class AttributeMasterServiceTest {
         assertThat(cap.value.status).isEqualTo(AttributeStatus.ACTIVE)
     }
 
+    @Test @DisplayName("New code with groupCode → saves with associated AttributeGroup")
+    fun create_withGroupCode_success() {
+        val dto = validDto.copy(groupCode = "CONSENT")
+        val group = AttributeGroup(code = "CONSENT", displayNameEn = "Consent", displayNameTh = "ความยินยอม")
+        whenever(repository.existsById("MAX_LIMIT")).thenReturn(false)
+        whenever(groupRepository.findById("CONSENT")).thenReturn(Optional.of(group))
+        
+        val activeWithGroup = active.apply { attributeGroup = group }
+        whenever(repository.save(any<AttributeMaster>())).thenReturn(activeWithGroup)
+        
+        val result = service.create(dto)
+        
+        val cap = ArgumentCaptor.forClass(AttributeMaster::class.java)
+        verify(repository).save(cap.capture())
+        assertThat(cap.value.attributeGroup).isEqualTo(group)
+        assertThat(result.groupCode).isEqualTo("CONSENT")
+    }
+
     @Test @DisplayName("Duplicate code → throws AttributeValidationException, never saves")
     fun create_duplicateCode() {
         whenever(repository.existsById("MAX_LIMIT")).thenReturn(true)
@@ -166,6 +186,19 @@ class AttributeMasterServiceTest {
         service.update("MAX_LIMIT", dto)
         assertThat(active.displayName).isEqualTo("Updated Name")
         assertThat(active.version).isEqualTo(2L)
+    }
+
+    @Test @DisplayName("Update groupCode → updates attributeGroup association")
+    fun update_groupCode_success() {
+        val group = AttributeGroup(code = "CONSENT", displayNameEn = "Consent", displayNameTh = "ความยินยอม")
+        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
+        whenever(groupRepository.findById("CONSENT")).thenReturn(Optional.of(group))
+        whenever(repository.save(any<AttributeMaster>())).thenReturn(active)
+        
+        val dto = AttributeMasterDto(displayName = "Updated Name", groupCode = "CONSENT")
+        service.update("MAX_LIMIT", dto)
+        
+        assertThat(active.attributeGroup).isEqualTo(group)
     }
 
     @Test @DisplayName("Non-existent code on update → throws ResourceNotFoundException")

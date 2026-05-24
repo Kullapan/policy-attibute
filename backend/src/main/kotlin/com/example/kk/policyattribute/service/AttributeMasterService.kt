@@ -6,13 +6,15 @@ import com.example.kk.policyattribute.exception.ResourceNotFoundException
 import com.example.kk.policyattribute.model.AttributeMaster
 import com.example.kk.policyattribute.model.AttributeStatus
 import com.example.kk.policyattribute.repository.AttributeMasterRepository
+import com.example.kk.policyattribute.repository.AttributeGroupRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.regex.PatternSyntaxException
 
 @Service
 class AttributeMasterService(
-    private val repository: AttributeMasterRepository
+    private val repository: AttributeMasterRepository,
+    private val groupRepository: AttributeGroupRepository
 ) {
 
     /**
@@ -61,6 +63,12 @@ class AttributeMasterService(
         existing.isRequired = dto.isRequired
         existing.regexPattern = dto.regexPattern
         existing.regexErrorMsg = dto.regexErrorMsg
+        existing.attributeGroup = dto.groupCode?.let { gc ->
+            if (gc.isNotBlank()) {
+                groupRepository.findById(gc)
+                    .orElseThrow { ResourceNotFoundException("AttributeGroup", gc) }
+            } else null
+        }
 
         // Optimistic locking via @Version — pass version from client
         dto.version?.let { existing.version = it }
@@ -102,6 +110,7 @@ class AttributeMasterService(
         isRequired    = entity.isRequired,
         regexPattern  = entity.regexPattern,
         regexErrorMsg = entity.regexErrorMsg,
+        groupCode     = entity.attributeGroup?.code,
         version       = entity.version,
         createdAt     = entity.createdAt,
         updatedAt     = entity.updatedAt,
@@ -115,5 +124,12 @@ class AttributeMasterService(
         isRequired    = dto.isRequired,
         regexPattern  = dto.regexPattern,
         regexErrorMsg = dto.regexErrorMsg
-    )
+    ).apply {
+        attributeGroup = dto.groupCode?.let { gc ->
+            if (gc.isNotBlank()) {
+                groupRepository.findById(gc)
+                    .orElseThrow { ResourceNotFoundException("AttributeGroup", gc) }
+            } else null
+        }
+    }
 }

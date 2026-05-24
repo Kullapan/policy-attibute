@@ -129,6 +129,22 @@ class PolicyAttributeServiceTest {
         assertThat(result[0].attributeCode).isEqualTo("STR_ATTR")
     }
 
+    @Test @DisplayName("getAttributesForPolicy → maps groupCode from AttributeGroup")
+    fun getAttributesForPolicy_mapsGroupCode() {
+        val group = AttributeGroup(code = "CONSENT", displayNameEn = "Consent", displayNameTh = "ความยินยอม")
+        val master = buildMaster("STR_ATTR", DataType.STRING, false, null, null).apply {
+            attributeGroup = group
+        }
+        val pav = buildValue("POL-001", "STR_ATTR", "hello").apply {
+            attributeMaster = master
+        }
+        whenever(valueRepository.findByIdPolicyNo("POL-001")).thenReturn(listOf(pav))
+
+        val result = service.getAttributesForPolicy("POL-001")
+        assertThat(result).hasSize(1)
+        assertThat(result[0].groupCode).isEqualTo("CONSENT")
+    }
+
     @Test @DisplayName("Policy with no attributes → returns empty list")
     fun getAttributesForPolicy_empty() {
         whenever(valueRepository.findByIdPolicyNo("POL-EMPTY")).thenReturn(emptyList())

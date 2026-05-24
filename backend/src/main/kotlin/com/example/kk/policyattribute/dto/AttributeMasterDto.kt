@@ -33,6 +33,8 @@ data class AttributeMasterDto(
 
     val regexErrorMsg: String? = null,
 
+    val groupCode: String? = null,
+
     val version: Long? = null,
 
     // Read-only audit fields

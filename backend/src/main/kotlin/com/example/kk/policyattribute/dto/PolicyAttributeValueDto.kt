@@ -22,6 +22,7 @@ data class PolicyAttributeValueDto(
     val isRequired: Boolean = false,
     val regexPattern: String? = null,
     val regexErrorMsg: String? = null,
+    val groupCode: String? = null,
 
     // Read-only audit fields
     val createdAt: Instant? = null,

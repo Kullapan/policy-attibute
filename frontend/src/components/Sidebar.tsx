@@ -3,7 +3,6 @@ import { NavLink } from 'react-router-dom';
 const navItems = [
   { to: '/', label: 'Dictionary', icon: '📋' },
   { to: '/policies', label: 'Policy Dashboard', icon: '📊' },
-  { to: '/policy-mapping', label: 'Policy Mapping', icon: '🔗' },
   { to: '/bulk-upload', label: 'Bulk Upload', icon: '📤' },
 ];
 

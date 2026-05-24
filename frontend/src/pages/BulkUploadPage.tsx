@@ -148,7 +148,7 @@ export default function BulkUploadPage() {
   };
 
   const downloadTemplate = () => {
-    const csv = 'policy_no,attribute_code,attribute_value\nPOL-2026-001,MAX_COVERAGE,500000.00\nPOL-2026-001,IS_RENEWABLE,true';
+    const csv = 'policy_no,attribute_code,attribute_value\n501-545623,PDPA_CONSENT,Yes\n501-545623,VC_OLDER_THAN_60,true\n501-545623,RPQ_SCORE,12';
     triggerDownload(csv, 'pams_upload_template.csv');
   };
 

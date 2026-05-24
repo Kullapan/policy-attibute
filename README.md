@@ -57,26 +57,27 @@ The backend follows a **standard 3-tier Spring MVC architecture** with clear lay
 ┌─────────────────────────────────────────────────────────────┐
 │                    controller (REST Layer)                    │
 │   AttributeMasterController  PolicyAttributeController       │
-│   BulkUploadController       GlobalExceptionHandler          │
-│                              (@RestControllerAdvice)         │
+│   AttributeGroupController   BulkUploadController            │
+│   GlobalExceptionHandler                                     │
 └───────────────────────┬─────────────────────────────────────┘
                         │ calls
 ┌───────────────────────▼─────────────────────────────────────┐
 │                   service (Business Logic)                    │
 │   AttributeMasterService   PolicyAttributeService            │
-│   BulkUploadService                                          │
+│   AttributeGroupService    BulkUploadService                 │
 └───────────────────────┬─────────────────────────────────────┘
                         │ uses
 ┌───────────────────────▼─────────────────────────────────────┐
 │                  repository (Data Access)                     │
 │   AttributeMasterRepository  PolicyMasterRepository          │
-│   PolicyAttributeValueRepository                             │
+│   AttributeGroupRepository   PolicyAttributeValueRepository  │
 └───────────────────────┬─────────────────────────────────────┘
                         │ persisted via
 ┌───────────────────────▼─────────────────────────────────────┐
 │                    model (Domain Entities)                    │
 │   AttributeMaster    PolicyMaster    PolicyAttributeValue    │
-│   AttributeStatus    DataType        PolicyAttributeValueId  │
+│   AttributeGroup     AttributeStatus DataType                │
+│   PolicyAttributeValueId                                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -103,6 +104,18 @@ The backend follows a **standard 3-tier Spring MVC architecture** with clear lay
 ```mermaid
 erDiagram
 
+    ATTRIBUTE_GROUP {
+        VARCHAR(50)     code            PK  "UPPER_SNAKE_CASE e.g. CONSENT"
+        VARCHAR(100)    display_name_en     "English group label"
+        VARCHAR(100)    display_name_th     "Thai group label"
+        INT             display_order       "Render hierarchy order"
+        VARCHAR(20)     status              "ACTIVE | ARCHIVED (soft-delete)"
+        BIGINT          version             "Optimistic lock counter"
+        TIMESTAMPTZ     created_at
+        TIMESTAMPTZ     updated_at
+        VARCHAR(100)    created_by
+    }
+
     ATTRIBUTE_MASTER {
         VARCHAR(100)    code            PK  "UPPER_SNAKE_CASE e.g. MAX_LIMIT"
         VARCHAR(255)    display_name        "Human-readable label"
@@ -111,6 +124,7 @@ erDiagram
         BOOLEAN         is_required
         VARCHAR(255)    regex_pattern       "Optional Java regex"
         VARCHAR(255)    regex_error_msg     "Shown to client on mismatch"
+        VARCHAR(50)     group_code      FK  "Links to ATTRIBUTE_GROUP"
         BIGINT          version             "Optimistic lock counter"
         TIMESTAMPTZ     created_at
         TIMESTAMPTZ     updated_at
@@ -136,13 +150,15 @@ erDiagram
 
     POLICY_MASTER       ||--o{ POLICY_ATTRIBUTE_VALUES : "has many"
     ATTRIBUTE_MASTER    ||--o{ POLICY_ATTRIBUTE_VALUES : "referenced by"
+    ATTRIBUTE_GROUP     ||--o{ ATTRIBUTE_MASTER        : "groups"
 ```
 
 ### Entity Descriptions
 
 | Entity | Table | Description |
 |--------|-------|-------------|
-| `AttributeMaster` | `attribute_master` | Central dictionary of attribute definitions. Each row defines one reusable attribute type with validation rules. |
+| `AttributeGroup` | `attribute_group` | Defines group categories for policy attributes. Used to dynamically group attributes and render tabs/dropdown filters. |
+| `AttributeMaster` | `attribute_master` | Central dictionary of attribute definitions. Each row defines one reusable attribute type with validation rules, optionally linked to an `attribute_group`. |
 | `PolicyMaster` | `policy_master` | Represents an insurance policy. Serves as the left-hand side of attribute mappings. |
 | `PolicyAttributeValue` | `policy_attribute_values` | Junction / fact table. Stores the actual **value** of an attribute **for a specific policy**. PK is `(policy_no, attribute_code)`. |
 
@@ -385,7 +401,32 @@ policy-attibute/
 Base URL: `http://localhost:8080/api/v1`  
 Interactive docs: `http://localhost:8080/swagger-ui.html`
 
-### 7.1 Attribute Dictionary — `/api/v1/attributes`
+### 7.1 Attribute Groups — `/api/v1/attribute-groups`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/attribute-groups` | List all groups. Optional: `?includeArchived=true` to include archived groups |
+| `GET` | `/attribute-groups/{code}` | Get a single group by its `UPPER_SNAKE_CASE` code |
+| `POST` | `/attribute-groups` | Create a new attribute group definition |
+| `PUT` | `/attribute-groups/{code}` | Update an existing attribute group definition |
+| `DELETE` | `/attribute-groups/{code}` | Soft-delete (sets `status = ARCHIVED`) |
+
+**AttributeGroupDto schema:**
+```json
+{
+  "code":           "CONSENT",
+  "displayNameEn":  "Consent",
+  "displayNameTh":  "ความยินยอม (Consent)",
+  "displayOrder":   1,
+  "status":         "ACTIVE",
+  "version":        0,
+  "createdAt":      "2026-05-24T00:00:00Z",
+  "updatedAt":      "2026-05-24T00:00:00Z",
+  "createdBy":      "system"
+}
+```
+
+### 7.2 Attribute Dictionary — `/api/v1/attributes`
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -414,7 +455,7 @@ Interactive docs: `http://localhost:8080/swagger-ui.html`
 
 ---
 
-### 7.2 Policy & Attribute Values — `/api/v1/policies`
+### 7.3 Policy & Attribute Values — `/api/v1/policies`
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -431,7 +472,7 @@ Interactive docs: `http://localhost:8080/swagger-ui.html`
 
 ---
 
-### 7.3 Bulk Upload — `/api/v1/bulk-upload`
+### 7.4 Bulk Upload — `/api/v1/bulk-upload`
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -592,6 +633,8 @@ Managed by **Flyway** (`classpath:db/migration`):
 | V2 | `V2__insert_test_data.sql` | Seeds initial attribute definitions for testing |
 | V3 | `V3__create_policy_master.sql` | Creates `policy_master` table |
 | V4 | `V4__add_consent_attributes.sql` | Adds `PDPA_CONSENT`, `RPQ_COMPLETED`, `MARKETING_CONSENT` attributes and consent seed data |
+| V5 | `V5__revise_test_data_display_names.sql` | Revises test data display names in database |
+| V6 | `V6__create_attribute_group.sql` | Introduces `attribute_group` table and links it to `attribute_master` via foreign key `group_code` |
 
 > Flyway runs automatically on `bootRun`. Configuration: `spring.flyway.baseline-on-migrate=true`.
 

@@ -8,41 +8,30 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener
 import java.time.Instant
 
 /**
- * Master dictionary entity for policy attribute definitions.
- * Uses soft-delete (status → ARCHIVED) and optimistic locking (@Version).
+ * Entity representing an attribute category/group.
+ * Used to dynamically group attributes and render tabs in the UI.
  */
 @Entity
-@Table(name = "attribute_master")
+@Table(name = "attribute_group")
 @EntityListeners(AuditingEntityListener::class)
-class AttributeMaster(
+class AttributeGroup(
 
     @Id
-    @Column(name = "code", length = 100, nullable = false, updatable = false)
+    @Column(name = "code", length = 50, nullable = false)
     var code: String = "",
 
-    @Column(name = "display_name", length = 255, nullable = false)
-    var displayName: String = "",
+    @Column(name = "display_name_en", length = 100, nullable = false)
+    var displayNameEn: String = "",
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "data_type", length = 20, nullable = false)
-    var dataType: DataType = DataType.STRING,
+    @Column(name = "display_name_th", length = 100, nullable = false)
+    var displayNameTh: String = "",
+
+    @Column(name = "display_order", nullable = false)
+    var displayOrder: Int = 0,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
     var status: AttributeStatus = AttributeStatus.ACTIVE,
-
-    @Column(name = "is_required", nullable = false)
-    var isRequired: Boolean = false,
-
-    @Column(name = "regex_pattern", length = 255)
-    var regexPattern: String? = null,
-
-    @Column(name = "regex_error_msg", length = 255)
-    var regexErrorMsg: String? = null,
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "group_code")
-    var attributeGroup: AttributeGroup? = null,
 
     @Version
     @Column(name = "version", nullable = false)

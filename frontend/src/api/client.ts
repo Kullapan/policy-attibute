@@ -1,4 +1,6 @@
 import type {
+  AttributeGroup,
+  AttributeGroupForm,
   AttributeMaster,
   AttributeMasterForm,
   AttributeStatus,
@@ -105,4 +107,43 @@ export async function uploadCsv(file: File): Promise<BulkUploadResult> {
     body: formData,
   });
   return handleResponse(res);
+}
+
+// ── Attribute Groups ─────────────────────────────────────
+
+export async function fetchAttributeGroups(includeArchived?: boolean): Promise<AttributeGroup[]> {
+  const params = new URLSearchParams();
+  if (includeArchived) params.set('includeArchived', 'true');
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/attribute-groups${qs ? '?' + qs : ''}`);
+  return handleResponse(res);
+}
+
+export async function createAttributeGroup(dto: AttributeGroupForm): Promise<AttributeGroup> {
+  const res = await fetch(`${API_BASE}/attribute-groups`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+  return handleResponse(res);
+}
+
+export async function updateAttributeGroup(
+  code: string,
+  dto: AttributeGroupForm
+): Promise<AttributeGroup> {
+  const res = await fetch(`${API_BASE}/attribute-groups/${code}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteAttributeGroup(code: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/attribute-groups/${code}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(error.message || `Delete failed: ${res.status}`);
+  }
 }

@@ -171,7 +171,8 @@ class PolicyAttributeService(
             dataType       = m?.dataType?.name,
             isRequired     = m?.isRequired ?: false,
             regexPattern   = m?.regexPattern,
-            regexErrorMsg  = m?.regexErrorMsg
+            regexErrorMsg  = m?.regexErrorMsg,
+            groupCode      = m?.attributeGroup?.code
         )
     }
 }

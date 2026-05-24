@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import TopNav from '../components/TopNav';
 import Toast from '../components/Toast';
-import { fetchAllPolicies, fetchPolicyAttributes } from '../api/client';
-import type { PolicyMaster, PolicyAttributeValue } from '../types';
+import PolicyDetailPanel from '../components/PolicyDetailPanel';
+import DynamicInput from '../components/DynamicInput';
+import { fetchAllPolicies, fetchPolicyAttributes, updatePolicyAttribute, fetchAttributes, fetchAttributeGroups } from '../api/client';
+import type { PolicyMaster, PolicyAttributeValue, AttributeMaster, AttributeGroup } from '../types';
 
 // ── Static customer info (not an attribute, displayed from UI layer only) ────
-const CUSTOMER_INFO: Record<string, { name: string; email: string }> = {
-  'POL-2026-001': { name: 'John A. Smith',    email: 'john.s@example.com'   },
+export const CUSTOMER_INFO: Record<string, { name: string; email: string }> = {
+  'POL-2026-001': { name: 'คุณธนพงษ์ มั่งมี',    email: 'john.s@example.com'   },
   'POL-2026-002': { name: 'Jane Doe',         email: 'jane.d@example.com'   },
   'POL-2026-003': { name: 'Robert K. Lee',    email: 'robert.l@example.com' },
   '501-545623':   { name: 'Somchai Dee-ing',  email: 'somchai.d@example.com'},
@@ -15,141 +17,162 @@ const CUSTOMER_INFO: Record<string, { name: string; email: string }> = {
   '503-987654':   { name: 'Wassana Siri',     email: 'wassana.s@example.com'},
 };
 
-// ── Consent status colour config ──────────────────────────────────────────────
-type ConsentChipType = 'yes' | 'no' | 'pending' | 'valid' | 'unknown';
-
-function getChipType(value: string | undefined): ConsentChipType {
-  if (!value) return 'unknown';
-  const v = value.toLowerCase();
-  if (v === 'yes')     return 'yes';
-  if (v === 'no')      return 'no';
-  if (v === 'pending') return 'pending';
-  if (v === 'valid')   return 'valid';
-  return 'unknown';
-}
-
-const CHIP_STYLES: Record<ConsentChipType, { bg: string; text: string; dot: string }> = {
-  yes:     { bg: '#e8f5e9', text: '#1b5e20', dot: '#43a047' },  // soft green
-  no:      { bg: '#fce4e4', text: '#7f1d1d', dot: '#e53935' },  // soft red
-  pending: { bg: '#fff8e1', text: '#4d3600', dot: '#f59e0b' },  // soft amber
-  valid:   { bg: '#ede8ff', text: '#1e0a55', dot: '#7c3aed' },  // soft purple
-  unknown: { bg: '#f0f3ff', text: '#454653', dot: '#767685' },  // neutral
-};
-
 // ── Policy row data shape ─────────────────────────────────────────────────────
 interface PolicyRow {
-  policy:          PolicyMaster;
-  pdpaConsent:     string;
-  rpqCompleted:    string;
-  marketingConsent:string;
-}
-
-// ── Consent Chip component ────────────────────────────────────────────────────
-function ConsentChip({ value }: { value: string }) {
-  const type = getChipType(value);
-  const { bg, text, dot } = CHIP_STYLES[type];
-  return (
-    <span
-      style={{ backgroundColor: bg, color: text }}
-      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[0.6875rem] font-semibold tracking-wide whitespace-nowrap"
-    >
-      <span
-        style={{ backgroundColor: dot }}
-        className="w-1.5 h-1.5 rounded-full shrink-0"
-      />
-      {value || '—'}
-    </span>
-  );
-}
-
-// ── Action Menu component ─────────────────────────────────────────────────────
-function ActionMenu({ policyNo, onNavigate }: { policyNo: string; onNavigate: (p: string) => void }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="relative" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        tabIndex={0}
-        className="w-8 h-8 flex items-center justify-center rounded-md text-[#767685] hover:bg-[#e0e8fb] hover:text-[#000051] transition-colors duration-150 text-lg"
-      >
-        ⋮
-      </button>
-
-      {open && (
-        <div
-          className="absolute right-0 top-9 z-50 w-52 rounded-lg py-1 text-sm"
-          style={{
-            background: 'rgba(249, 249, 255, 0.95)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            boxShadow: '0 4px 16px rgba(20, 28, 41, 0.10)',
-            border: '1px solid rgba(198,197,213,0.20)',
-          }}
-        >
-          <button
-            onClick={() => { setOpen(false); onNavigate(policyNo); }}
-            className="w-full text-left px-4 py-2.5 text-[#141c29] hover:bg-[#e7eeff] transition-colors"
-          >
-            🔗 View Attribute Mapping
-          </button>
-          <button
-            onClick={() => { navigator.clipboard.writeText(policyNo); setOpen(false); }}
-            className="w-full text-left px-4 py-2.5 text-[#141c29] hover:bg-[#e7eeff] transition-colors"
-          >
-            📋 Copy Policy No
-          </button>
-        </div>
-      )}
-    </div>
-  );
+  policy: PolicyMaster;
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function PolicyListPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [rows,    setRows]    = useState<PolicyRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search,  setSearch]  = useState('');
-  const [toast,   setToast]   = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  // Policy List states
+  const [rows, setRows] = useState<PolicyRow[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [search, setSearch] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Policy Details states
+  const [selectedPolicyNo, setSelectedPolicyNo] = useState<string | null>(null);
+  const [attributes, setAttributes] = useState<PolicyAttributeValue[]>([]);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [savingField, setSavingField] = useState<string | null>(null);
+
+  // Add Attribute Modal states
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [masterDictionary, setMasterDictionary] = useState<AttributeMaster[]>([]);
+  const [newSelectedCode, setNewSelectedCode] = useState('');
+  const [newInitialValue, setNewInitialValue] = useState('');
+  const [groups, setGroups] = useState<AttributeGroup[]>([]);
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('');
+
+  // Fetch active groups on mount
+  useEffect(() => {
+    async function loadGroups() {
+      try {
+        const data = await fetchAttributeGroups();
+        setGroups(data);
+      } catch {
+        setToast({ message: 'Failed to load attribute groups', type: 'error' });
+      }
+    }
+    loadGroups();
+  }, []);
+
+  // 1. Fetch Policy List
+  const loadList = useCallback(async () => {
+    setLoadingList(true);
     try {
       const policies = await fetchAllPolicies();
-
-      const settled = await Promise.allSettled(
-        policies.map(async (p) => {
-          let attrs: PolicyAttributeValue[] = [];
-          try { attrs = await fetchPolicyAttributes(p.policyNo); } catch { /* not all policies have consent data */ }
-
-          const find = (code: string) => attrs.find(a => a.attributeCode === code)?.attributeValue ?? '—';
-          return {
-            policy:          p,
-            pdpaConsent:     find('PDPA_CONSENT'),
-            rpqCompleted:    find('RPQ_COMPLETED'),
-            marketingConsent:find('MARKETING_CONSENT'),
-          } satisfies PolicyRow;
-        })
-      );
-
-      setRows(
-        settled
-          .filter((r): r is PromiseFulfilledResult<PolicyRow> => r.status === 'fulfilled')
-          .map(r => r.value)
-      );
+      setRows(policies.map(p => ({ policy: p })));
     } catch {
       setToast({ message: 'Failed to load policies', type: 'error' });
     } finally {
-      setLoading(false);
+      setLoadingList(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    loadList();
+  }, [loadList]);
 
-  const handleNavigateMapping = (policyNo: string) => {
-    navigate(`/policy-mapping?search=${encodeURIComponent(policyNo)}`);
+  // 2. Fetch Policy Details (Attributes)
+  const selectPolicy = async (policyNo: string) => {
+    setSelectedPolicyNo(policyNo);
+    setLoadingDetails(true);
+    try {
+      const data = await fetchPolicyAttributes(policyNo);
+      setAttributes(data);
+
+      const vals: Record<string, string> = {};
+      data.forEach((attr) => {
+        vals[attr.attributeCode] = attr.attributeValue || '';
+      });
+      setValues(vals);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load policy attributes';
+      setToast({ message: msg, type: 'error' });
+      setSelectedPolicyNo(null);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  // 3. Auto-load when navigation contains ?search= query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const searchParam = params.get('search');
+    if (searchParam) {
+      selectPolicy(searchParam);
+    } else {
+      setSelectedPolicyNo(null);
+    }
+  }, [location.search]);
+
+  // 4. Navigation interactions
+  const handleSelectPolicy = (policyNo: string) => {
+    navigate(`?search=${encodeURIComponent(policyNo)}`);
+  };
+
+  const handleBackToSearch = () => {
+    navigate('/policies');
+  };
+
+  // 5. Update/Save individual attribute field
+  const handleSaveField = async (attributeCode: string) => {
+    if (!selectedPolicyNo) return;
+    setSavingField(attributeCode);
+    try {
+      await updatePolicyAttribute(selectedPolicyNo, attributeCode, values[attributeCode]);
+      setToast({ message: `${attributeCode} saved successfully`, type: 'success' });
+      
+      setAttributes(prev => prev.map(a => 
+        a.attributeCode === attributeCode ? { ...a, attributeValue: values[attributeCode] } : a
+      ));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Save failed';
+      setToast({ message: msg, type: 'error' });
+    } finally {
+      setSavingField(null);
+    }
+  };
+
+  // 6. Open Modal to Add New Attribute definition to policy
+  const handleOpenModal = async () => {
+    try {
+      const allMaster = await fetchAttributes();
+      setMasterDictionary(allMaster);
+      setIsModalOpen(true);
+      setNewSelectedCode('');
+      setNewInitialValue('');
+      setSelectedGroupFilter('');
+    } catch(err) {
+      setToast({ message: 'Failed to load dictionary', type: 'error' });
+    }
+  };
+
+  const handleAddNewAttribute = async () => {
+    if (!selectedPolicyNo || !newSelectedCode) return;
+    
+    try {
+      await updatePolicyAttribute(selectedPolicyNo, newSelectedCode, newInitialValue);
+      setToast({ message: `Attribute ${newSelectedCode} added`, type: 'success' });
+      setIsModalOpen(false);
+      
+      // Refresh detailed attributes list
+      const data = await fetchPolicyAttributes(selectedPolicyNo);
+      setAttributes(data);
+      const vals: Record<string, string> = {};
+      data.forEach((attr) => {
+        vals[attr.attributeCode] = attr.attributeValue || '';
+      });
+      setValues(vals);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to add attribute';
+      setToast({ message: msg, type: 'error' });
+    }
   };
 
   const filtered = rows.filter(r =>
@@ -157,9 +180,173 @@ export default function PolicyListPage() {
     (CUSTOMER_INFO[r.policy.policyNo]?.name ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
+  // Modal Dropdown list attributes filter
+  const unmappedAttributes = masterDictionary.filter(
+    md => md.status !== 'ARCHIVED' && !attributes.some(a => a.attributeCode === md.code)
+  );
+
+  const filteredUnmappedAttributes = unmappedAttributes.filter(attr => {
+    if (selectedGroupFilter === '') return true;
+    if (selectedGroupFilter === '_UNASSIGNED_') return !attr.groupCode;
+    return attr.groupCode === selectedGroupFilter;
+  });
+
+  const selectedAttrDef = unmappedAttributes.find(a => a.code === newSelectedCode);
+
+  // If a policy is currently selected, display the PolicyDetailPanel mapping view
+  if (selectedPolicyNo) {
+    const selectedPolicy = rows.find(r => r.policy.policyNo === selectedPolicyNo)?.policy || {
+      policyNo: selectedPolicyNo,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: 'SYSTEM'
+    };
+
+    return (
+      <>
+        <TopNav title="Policy Management Dashboard" />
+        <div className="flex-1 overflow-y-auto px-16 py-8">
+          <PolicyDetailPanel
+            policy={selectedPolicy}
+            attributes={attributes}
+            values={values}
+            onValueChange={(code, val) => setValues(prev => ({ ...prev, [code]: val }))}
+            onSaveField={handleSaveField}
+            onAddAttributeClick={handleOpenModal}
+            savingField={savingField}
+            loading={loadingDetails}
+            onBack={handleBackToSearch}
+            groups={groups}
+          />
+        </div>
+
+        {/* Add Attribute Modal */}
+        {isModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141c29]/40 backdrop-blur-sm">
+            <div className="bg-surface-container-lowest rounded-xl shadow-2xl p-8 max-w-lg w-full border border-[rgba(198,197,213,0.2)]">
+              <h2 className="font-display text-xl font-semibold text-on_surface mb-6">Add New Attribute</h2>
+              
+              <div className="space-y-6">
+                {/* Filter by Group */}
+                <div className="grid grid-cols-[33%_67%] items-start gap-x-4 gap-y-2">
+                  <div className="pt-2.5">
+                    <label className="text-xs font-bold text-[#767685] uppercase tracking-wider block">Group</label>
+                  </div>
+                  <div>
+                    <select 
+                      value={selectedGroupFilter}
+                      onChange={e => {
+                        setSelectedGroupFilter(e.target.value);
+                        setNewSelectedCode('');
+                        setNewInitialValue('');
+                      }}
+                      className="w-full px-4 py-2.5 rounded-md border border-[rgba(198,197,213,0.3)] text-sm bg-white outline-none focus:border-tertiary-container focus:shadow-ambient cursor-pointer"
+                    >
+                      <option value="">All Groups</option>
+                      {groups.map(g => (
+                        <option key={g.code} value={g.code}>
+                          {g.displayNameTh || g.displayNameEn} ({g.code})
+                        </option>
+                      ))}
+                      <option value="_UNASSIGNED_">-- Unassigned --</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[33%_67%] items-start gap-x-4 gap-y-2">
+                  <div className="pt-2.5">
+                    <label className="text-xs font-bold text-[#767685] uppercase tracking-wider block">Attribute</label>
+                  </div>
+                  <div>
+                    <select 
+                      value={newSelectedCode}
+                      onChange={e => setNewSelectedCode(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-md border border-[rgba(198,197,213,0.3)] text-sm bg-white outline-none focus:border-tertiary-container focus:shadow-ambient cursor-pointer"
+                      disabled={filteredUnmappedAttributes.length === 0}
+                    >
+                      {filteredUnmappedAttributes.length === 0 ? (
+                        <option value="" disabled>-- No unmapped attributes --</option>
+                      ) : (
+                        <>
+                          <option value="" disabled>-- Select an unmapped attribute --</option>
+                          {filteredUnmappedAttributes.map(attr => (
+                            <option key={attr.code} value={attr.code}>
+                              {attr.displayName || attr.code}
+                            </option>
+                          ))}
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </div>
+
+                {filteredUnmappedAttributes.length === 0 && (
+                  <div className="px-4 py-3 rounded-md bg-[#e7eeff] text-xs font-semibold text-[#000051] flex items-center gap-2.5 transition-all duration-200">
+                    <span className="text-sm">✓</span>
+                    <span>
+                      {selectedGroupFilter === '' 
+                        ? 'All available dictionary attributes are already mapped to this policy.' 
+                        : 'All attributes in this group are already mapped to this policy.'}
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  {selectedAttrDef ? (
+                    <DynamicInput
+                      label="Initial Value"
+                      value={newInitialValue}
+                      onChange={setNewInitialValue}
+                      dataType={selectedAttrDef.dataType || 'STRING'}
+                      required={selectedAttrDef.isRequired}
+                      regex={selectedAttrDef.regexPattern}
+                      regexErrorMsg={selectedAttrDef.regexErrorMsg}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-[33%_67%] items-start gap-x-4 gap-y-2">
+                      <div className="pt-2.5">
+                        <label className="text-xs font-bold text-[#767685] uppercase tracking-wider block">Initial Value</label>
+                      </div>
+                      <div>
+                        <input 
+                          type="text" 
+                          value=""
+                          disabled
+                          placeholder="Select an attribute first"
+                          className="w-full px-4 py-2.5 rounded-md border border-[rgba(198,197,213,0.3)] text-sm bg-surface-dim outline-none opacity-50 cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end mt-8">
+                <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-on_surface-variant hover:text-on_surface cursor-pointer">Cancel</button>
+                <button 
+                  onClick={handleAddNewAttribute} 
+                  className="px-4 py-2 rounded-md bg-gradient-to-br from-primary-custom to-primary-container text-white text-sm font-semibold hover:shadow-md disabled:opacity-50 cursor-pointer"
+                  disabled={!newSelectedCode}
+                >
+                  Add to Policy
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {toast && (
+          <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+        )}
+      </>
+    );
+  }
+
+  // Otherwise, display the searchable Policy List view
   return (
     <>
-      <TopNav title="Policy Consent Dashboard" />
+      <TopNav title="Policy Management Dashboard" />
 
       <div className="flex-1 overflow-y-auto px-16 py-8">
         {/* ── Header ── */}
@@ -187,7 +374,7 @@ export default function PolicyListPage() {
 
         {/* ── Table ── */}
         <div className="rounded-lg overflow-hidden" style={{ boxShadow: '0 4px 20px rgba(20, 28, 41, 0.05)' }}>
-          {loading ? (
+          {loadingList ? (
             <div className="bg-white flex items-center justify-center py-32">
               <div className="flex flex-col items-center gap-3">
                 <div className="w-8 h-8 border-3 border-[#e0e0ff] border-t-[#00008f] rounded-full animate-spin" />
@@ -200,12 +387,8 @@ export default function PolicyListPage() {
               <thead>
                 <tr style={{ backgroundColor: '#dbe3f5' }}>
                   {[
-                    { label: 'Policy No',          width: 'w-32'  },
-                    { label: 'Customer Name',       width: 'w-56'  },
-                    { label: 'PDPA Consent',        width: 'w-36'  },
-                    { label: 'RPQ Completed',       width: 'w-36'  },
-                    { label: 'Marketing Consent',   width: 'w-36'  },
-                    { label: 'Actions',             width: 'w-20'  },
+                    { label: 'Policy No',          width: 'w-1/2'  },
+                    { label: 'Customer Name',       width: 'w-1/2'  },
                   ].map(col => (
                     <th
                       key={col.label}
@@ -221,7 +404,7 @@ export default function PolicyListPage() {
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-16 text-center text-sm text-[#767685]" style={{ backgroundColor: '#f9f9ff' }}>
+                    <td colSpan={2} className="px-6 py-16 text-center text-sm text-[#767685]" style={{ backgroundColor: '#f9f9ff' }}>
                       No policies match your search.
                     </td>
                   </tr>
@@ -240,8 +423,8 @@ export default function PolicyListPage() {
                         {/* Policy No */}
                         <td className="px-6 py-4 align-middle">
                           <button
-                            onClick={() => handleNavigateMapping(row.policy.policyNo)}
-                            className="text-[#00008f] font-semibold text-sm hover:underline underline-offset-2 leading-snug text-left"
+                            onClick={() => handleSelectPolicy(row.policy.policyNo)}
+                            className="text-[#00008f] font-semibold text-sm hover:underline underline-offset-2 leading-snug text-left cursor-pointer"
                           >
                             {row.policy.policyNo}
                           </button>
@@ -258,26 +441,6 @@ export default function PolicyListPage() {
                             <span className="text-sm text-[#767685]">—</span>
                           )}
                         </td>
-
-                        {/* PDPA Consent */}
-                        <td className="px-6 py-4 align-middle">
-                          <ConsentChip value={row.pdpaConsent} />
-                        </td>
-
-                        {/* RPQ Completed */}
-                        <td className="px-6 py-4 align-middle">
-                          <ConsentChip value={row.rpqCompleted} />
-                        </td>
-
-                        {/* Marketing Consent */}
-                        <td className="px-6 py-4 align-middle">
-                          <ConsentChip value={row.marketingConsent} />
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-4 py-4 align-middle">
-                          <ActionMenu policyNo={row.policy.policyNo} onNavigate={handleNavigateMapping} />
-                        </td>
                       </tr>
                     );
                   })
@@ -288,7 +451,7 @@ export default function PolicyListPage() {
         </div>
 
         {/* ── Footer summary ── */}
-        {!loading && filtered.length > 0 && (
+        {!loadingList && filtered.length > 0 && (
           <div
             className="mt-4 px-6 py-3 rounded-md text-[0.6875rem] text-[#767685] flex items-center gap-4"
             style={{ backgroundColor: '#d2daec' }}
