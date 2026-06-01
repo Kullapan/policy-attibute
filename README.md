@@ -1,7 +1,7 @@
 # Policy Attribute Management System (PAMS)
 
 > A full-stack enterprise application for managing and mapping dynamic policy attributes.  
-> **Backend:** Spring Boot 3.4.4 (Kotlin 1.9.25, WebFlux, R2DBC, Coroutines, Gradle) | **Frontend:** React 19 (TypeScript, Vite, Tailwind CSS) | **Database:** PostgreSQL 16
+> **Backend:** Spring Boot 4.0.6 (Kotlin 2.2.0, WebFlux, R2DBC, Coroutines, Gradle) | **Frontend:** React 19 (TypeScript, Vite, Tailwind CSS) | **Database:** PostgreSQL 16
 
 ---
 
@@ -36,10 +36,12 @@ The **Policy Attribute Management System (PAMS)** is a high-density, enterprise-
 
 | Layer          | Technology                                                      |
 |----------------|-----------------------------------------------------------------|
-| **Backend**    | Kotlin 1.9.25, Spring Boot 3.4.4, Gradle 8.x                   |
+| **Backend**    | Kotlin 2.2.0, Spring Boot 4.0.6, Gradle 9.x                   |
 | **Reactive**   | Spring WebFlux, Kotlin Coroutines & Flow                        |
-| **Plugins**    | `kotlin-jvm`, `kotlin-spring`                                   |
+| **Plugins**    | `kotlin-jvm 2.2.0`, `kotlin-spring 2.2.0`                      |
 | **Persistence**| Spring Data R2DBC (Reactive Postgres) + Flyway Migrations       |
+| **Serialization** | Jackson 3 (`tools.jackson.module:jackson-module-kotlin`)     |
+| **Testing**    | MockK, SpringMockk 5.0.1, WebTestClient, JaCoCo ≥ 80%          |
 | **Database**   | PostgreSQL 16 (Alpine)                                          |
 | **Frontend**   | React 19, TypeScript 6, Vite 6, Tailwind CSS 4                  |
 | **Routing**    | React Router DOM 7                                              |
@@ -187,7 +189,7 @@ graph TB
         BulkPage --> Components
     end
 
-    subgraph Backend["⚙️ Spring Boot 3.4.4 / Kotlin 1.9.25 (Port 8080)"]
+    subgraph Backend["⚙️ Spring Boot 4.0.6 / Kotlin 2.2.0 (Port 8080)"]
         direction TB
 
         subgraph REST["controller"]
@@ -695,4 +697,4 @@ The UI follows the **"Institutional Architect"** design language (documented in 
 
 ---
 
-*Generated: 2026-05-17 | Project: Policy Attribute Management System (PAMS) | Backend: Kotlin 1.9.25 + Spring Boot 3.4.4*
+*Generated: 2026-06-01 | Project: Policy Attribute Management System (PAMS) | Backend: Kotlin 2.2.0 + Spring Boot 4.0.6*
