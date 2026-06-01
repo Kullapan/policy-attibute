@@ -1,62 +1,77 @@
 package com.example.kk.policyattribute.model
 
-import jakarta.persistence.*
+import com.fasterxml.jackson.annotation.JsonIgnore
+import org.springframework.data.annotation.Id
+import org.springframework.data.annotation.Transient
+import org.springframework.data.annotation.Version
 import org.springframework.data.annotation.CreatedBy
 import org.springframework.data.annotation.CreatedDate
 import org.springframework.data.annotation.LastModifiedDate
-import org.springframework.data.jpa.domain.support.AuditingEntityListener
+import org.springframework.data.domain.Persistable
+import org.springframework.data.relational.core.mapping.Column
+import org.springframework.data.relational.core.mapping.Table
 import java.time.Instant
 
 /**
  * Master dictionary entity for policy attribute definitions.
  * Uses soft-delete (status → ARCHIVED) and optimistic locking (@Version).
  */
-@Entity
-@Table(name = "attribute_master")
-@EntityListeners(AuditingEntityListener::class)
+@Table("attribute_master")
 class AttributeMaster(
 
     @Id
-    @Column(name = "code", length = 100, nullable = false, updatable = false)
+    @Column("code")
     var code: String = "",
 
-    @Column(name = "display_name", length = 255, nullable = false)
+    @Column("display_name")
     var displayName: String = "",
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "data_type", length = 20, nullable = false)
+    @Column("data_type")
     var dataType: DataType = DataType.STRING,
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20, nullable = false)
+    @Column("status")
     var status: AttributeStatus = AttributeStatus.ACTIVE,
 
-    @Column(name = "is_required", nullable = false)
+    @Column("is_required")
     var isRequired: Boolean = false,
 
-    @Column(name = "regex_pattern", length = 255)
+    @Column("regex_pattern")
     var regexPattern: String? = null,
 
-    @Column(name = "regex_error_msg", length = 255)
+    @Column("regex_error_msg")
     var regexErrorMsg: String? = null,
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "group_code")
-    var attributeGroup: AttributeGroup? = null,
+    @Column("group_code")
+    var groupCode: String? = null,
 
     @Version
-    @Column(name = "version", nullable = false)
+    @Column("version")
     var version: Long? = null,
 
     @CreatedDate
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column("created_at")
     var createdAt: Instant? = null,
 
     @LastModifiedDate
-    @Column(name = "updated_at", nullable = false)
+    @Column("updated_at")
     var updatedAt: Instant? = null,
 
     @CreatedBy
-    @Column(name = "created_by", length = 100, nullable = false, updatable = false)
+    @Column("created_by")
     var createdBy: String? = null
-)
+
+) : Persistable<String> {
+
+    @JsonIgnore
+    override fun getId(): String = code
+
+    @Transient
+    private var isNewEntity: Boolean = false
+
+    @JsonIgnore
+    override fun isNew(): Boolean = isNewEntity || version == null
+
+    fun setNew(isNew: Boolean) {
+        this.isNewEntity = isNew
+    }
+}

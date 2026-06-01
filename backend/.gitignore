@@ -35,3 +35,42 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Kotlin ###
+# Kotlin incremental compilation cache
+.kotlin/
+
+### Secrets & Local Overrides ###
+# NEVER commit environment-specific secrets or local config overrides
+.env
+.env.*
+*.env
+application-local.properties
+application-local.yml
+application-secrets.properties
+
+### Logs ###
+*.log
+logs/
+build_log.txt
+
+### JaCoCo Coverage Reports ###
+*.exec
+build/reports/
+
+### Temp / Upload Files ###
+# Temp files created during CSV bulk upload processing
+*.tmp
+tmp/
+
+### OS Files ###
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+$RECYCLE.BIN/

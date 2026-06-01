@@ -11,6 +11,8 @@ import com.example.kk.policyattribute.repository.PolicyMasterRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.toList
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.util.Collections
@@ -43,11 +45,12 @@ class PolicyAttributeService(
      * Create a new policy and bulk save its attributes.
      */
     @Transactional
-    fun createPolicyWithAttributes(dto: CreatePolicyRequestDto): List<PolicyAttributeValueDto> {
+    suspend fun createPolicyWithAttributes(dto: CreatePolicyRequestDto): List<PolicyAttributeValueDto> {
         if (policyMasterRepository.existsById(dto.policyNo)) {
             throw IllegalArgumentException("Policy already exists: ${dto.policyNo}")
         }
-        policyMasterRepository.save(PolicyMaster(policyNo = dto.policyNo, status = "ACTIVE"))
+        val policy = PolicyMaster(policyNo = dto.policyNo, status = "ACTIVE").apply { setNew(true) }
+        policyMasterRepository.save(policy)
 
         val attrs = dto.attributes
         return if (!attrs.isNullOrEmpty()) {
@@ -61,22 +64,42 @@ class PolicyAttributeService(
      * Get all policies.
      */
     @Transactional(readOnly = true)
-    fun getAllPolicies(): List<PolicyMaster> = policyMasterRepository.findAll()
+    fun getAllPolicies(): Flow<PolicyMaster> = policyMasterRepository.findAll()
 
     /**
      * Get all attribute values for a given policy number.
      */
     @Transactional(readOnly = true)
-    fun getAttributesForPolicy(policyNo: String): List<PolicyAttributeValueDto> =
-        valueRepository.findByIdPolicyNo(policyNo).map { toDto(it) }
+    suspend fun getAttributesForPolicy(policyNo: String): List<PolicyAttributeValueDto> {
+        val values = valueRepository.findByPolicyNo(policyNo).toList()
+        val masters = masterRepository.findAll().toList().associateBy { it.id }
+
+        return values.map { value ->
+            val m = masters[value.attributeCode]
+            PolicyAttributeValueDto(
+                policyNo       = value.policyNo,
+                attributeCode  = value.attributeCode,
+                attributeValue = value.attributeValue,
+                createdAt      = value.createdAt,
+                updatedAt      = value.updatedAt,
+                createdBy      = value.createdBy,
+                displayName    = m?.displayName,
+                dataType       = m?.dataType?.name,
+                isRequired     = m?.isRequired ?: false,
+                regexPattern   = m?.regexPattern,
+                regexErrorMsg  = m?.regexErrorMsg,
+                groupCode      = m?.groupCode
+            )
+        }
+    }
 
     /**
      * Update (or create) a single attribute value for a policy.
      */
     @Transactional
-    fun updateAttributeValue(policyNo: String, attributeCode: String, attributeValue: String?): PolicyAttributeValueDto {
+    suspend fun updateAttributeValue(policyNo: String, attributeCode: String, attributeValue: String?): PolicyAttributeValueDto {
         val master = masterRepository.findById(attributeCode)
-            .orElseThrow { ResourceNotFoundException("AttributeMaster", attributeCode) }
+            ?: throw ResourceNotFoundException("AttributeMaster", attributeCode)
 
         if (master.status == AttributeStatus.ARCHIVED) {
             throw AttributeValidationException(attributeCode, "Cannot assign values to ARCHIVED attribute")
@@ -88,19 +111,39 @@ class PolicyAttributeService(
         // ── Regex validation with memoization ──
         validateValueAgainstRegex(master, attributeValue)
 
-        val id = PolicyAttributeValueId(policyNo, attributeCode)
-        val entity = valueRepository.findById(id)
-            .orElse(PolicyAttributeValue(id = id))
-        entity.attributeValue = attributeValue
+        val existing = valueRepository.findByPolicyNoAndAttributeCode(policyNo, attributeCode)
+        val entity = if (existing != null) {
+            existing.apply { this.attributeValue = attributeValue }
+        } else {
+            PolicyAttributeValue(
+                policyNo = policyNo,
+                attributeCode = attributeCode,
+                attributeValue = attributeValue
+            )
+        }
 
-        return toDto(valueRepository.save(entity))
+        val saved = valueRepository.save(entity)
+        return PolicyAttributeValueDto(
+            policyNo       = saved.policyNo,
+            attributeCode  = saved.attributeCode,
+            attributeValue = saved.attributeValue,
+            createdAt      = saved.createdAt,
+            updatedAt      = saved.updatedAt,
+            createdBy      = saved.createdBy,
+            displayName    = master.displayName,
+            dataType       = master.dataType.name,
+            isRequired     = master.isRequired,
+            regexPattern   = master.regexPattern,
+            regexErrorMsg  = master.regexErrorMsg,
+            groupCode      = master.groupCode
+        )
     }
 
     /**
      * Bulk save multiple attribute values for a single policy.
      */
     @Transactional
-    fun bulkSaveForPolicy(policyNo: String, dtos: List<PolicyAttributeValueDto>): List<PolicyAttributeValueDto> =
+    suspend fun bulkSaveForPolicy(policyNo: String, dtos: List<PolicyAttributeValueDto>): List<PolicyAttributeValueDto> =
         dtos.map { updateAttributeValue(policyNo, it.attributeCode, it.attributeValue) }
 
     // ── Validation: Strategy Pattern by DataType ─────────────
@@ -111,7 +154,7 @@ class PolicyAttributeService(
     fun validateDataType(master: AttributeMaster, value: String?) {
         if (value.isNullOrBlank()) {
             if (master.isRequired) {
-                throw AttributeValidationException(master.code, "Value is required but was empty")
+                throw AttributeValidationException(master.id, "Value is required but was empty")
             }
             return // nullable non-required fields are OK
         }
@@ -119,18 +162,18 @@ class PolicyAttributeService(
         when (master.dataType) {
             DataType.NUMBER -> {
                 value.toDoubleOrNull()
-                    ?: throw AttributeValidationException(master.code, "Expected a valid number but got: $value")
+                    ?: throw AttributeValidationException(master.id, "Expected a valid number but got: $value")
             }
             DataType.DATE -> {
                 try {
                     LocalDate.parse(value)
                 } catch (e: DateTimeParseException) {
-                    throw AttributeValidationException(master.code, "Expected a valid date (YYYY-MM-DD) but got: $value")
+                    throw AttributeValidationException(master.id, "Expected a valid date (YYYY-MM-DD) but got: $value")
                 }
             }
             DataType.BOOLEAN -> {
                 if (!value.equals("true", ignoreCase = true) && !value.equals("false", ignoreCase = true)) {
-                    throw AttributeValidationException(master.code, "Expected true or false but got: $value")
+                    throw AttributeValidationException(master.id, "Expected true or false but got: $value")
                 }
             }
             DataType.STRING -> {
@@ -152,27 +195,7 @@ class PolicyAttributeService(
         if (!compiled.matcher(value).matches()) {
             val errorMsg = master.regexErrorMsg
                 ?: "Value does not match expected format: $pattern"
-            throw AttributeValidationException(master.code, errorMsg)
+            throw AttributeValidationException(master.id, errorMsg)
         }
-    }
-
-    // ── Mapping ──────────────────────────────────────────────
-
-    private fun toDto(entity: PolicyAttributeValue): PolicyAttributeValueDto {
-        val m = entity.attributeMaster
-        return PolicyAttributeValueDto(
-            policyNo       = entity.id.policyNo,
-            attributeCode  = entity.id.attributeCode,
-            attributeValue = entity.attributeValue,
-            createdAt      = entity.createdAt,
-            updatedAt      = entity.updatedAt,
-            createdBy      = entity.createdBy,
-            displayName    = m?.displayName,
-            dataType       = m?.dataType?.name,
-            isRequired     = m?.isRequired ?: false,
-            regexPattern   = m?.regexPattern,
-            regexErrorMsg  = m?.regexErrorMsg,
-            groupCode      = m?.attributeGroup?.code
-        )
     }
 }

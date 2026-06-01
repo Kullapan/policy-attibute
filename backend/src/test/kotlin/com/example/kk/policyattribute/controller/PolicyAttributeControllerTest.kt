@@ -6,30 +6,27 @@ import com.example.kk.policyattribute.exception.AttributeValidationException
 import com.example.kk.policyattribute.exception.ResourceNotFoundException
 import com.example.kk.policyattribute.model.PolicyMaster
 import com.example.kk.policyattribute.service.PolicyAttributeService
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
+import io.mockk.coEvery
+import io.mockk.every
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.emptyFlow
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.any
-import org.mockito.kotlin.eq
-import org.mockito.kotlin.whenever
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
-import org.springframework.boot.test.mock.mockito.MockBean
+import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import org.springframework.test.web.reactive.server.WebTestClient
 import java.time.Instant
 
-@WebMvcTest(PolicyAttributeController::class)
+@WebFluxTest(PolicyAttributeController::class)
 @DisplayName("PolicyAttributeController Web Layer Tests")
 class PolicyAttributeControllerTest {
 
-    @Autowired lateinit var mockMvc: MockMvc
-    @Autowired lateinit var objectMapper: ObjectMapper
-    @MockBean lateinit var service: PolicyAttributeService
+    @Autowired lateinit var webTestClient: WebTestClient
+    @MockkBean lateinit var service: PolicyAttributeService
 
     lateinit var attrDto: PolicyAttributeValueDto
 
@@ -46,25 +43,27 @@ class PolicyAttributeControllerTest {
     @Test @DisplayName("POST /create → 200 OK with attribute list")
     fun createPolicy_success() {
         val req = CreatePolicyRequestDto(policyNo = "POL-001", attributes = listOf(attrDto))
-        whenever(service.createPolicyWithAttributes(any())).thenReturn(listOf(attrDto))
+        coEvery { service.createPolicyWithAttributes(any()) } returns listOf(attrDto)
 
-        mockMvc.perform(post("/api/v1/policies/create")
+        webTestClient.post().uri("/api/v1/policies/create")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(req)))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].policyNo").value("POL-001"))
+            .bodyValue(req)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].policyNo").isEqualTo("POL-001")
     }
 
     @Test @DisplayName("POST /create → 400 when policy already exists (IllegalArgumentException)")
     fun createPolicy_alreadyExists() {
         val req = CreatePolicyRequestDto(policyNo = "POL-DUP")
-        whenever(service.createPolicyWithAttributes(any()))
-            .thenThrow(IllegalArgumentException("Policy already exists: POL-DUP"))
+        coEvery { service.createPolicyWithAttributes(any()) } throws IllegalArgumentException("Policy already exists: POL-DUP")
 
-        mockMvc.perform(post("/api/v1/policies/create")
+        webTestClient.post().uri("/api/v1/policies/create")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(req)))
-            .andExpect(status().isBadRequest) // correctly handled by handleIllegalArgument → 400
+            .bodyValue(req)
+            .exchange()
+            .expectStatus().isBadRequest
     }
 
     // ── GET /api/v1/policies ─────────────────────────────────
@@ -72,93 +71,107 @@ class PolicyAttributeControllerTest {
     @Test @DisplayName("GET /api/v1/policies → 200 OK with policy list")
     fun getAllPolicies_success() {
         val pm = PolicyMaster(policyNo = "POL-001", status = "ACTIVE")
-        whenever(service.getAllPolicies()).thenReturn(listOf(pm))
+        every { service.getAllPolicies() } returns listOf(pm).asFlow()
 
-        mockMvc.perform(get("/api/v1/policies"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].policyNo").value("POL-001"))
+        webTestClient.get().uri("/api/v1/policies")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].policyNo").isEqualTo("POL-001")
     }
 
     @Test @DisplayName("GET /api/v1/policies → 200 OK with empty list when no policies")
     fun getAllPolicies_empty() {
-        whenever(service.getAllPolicies()).thenReturn(emptyList())
-        mockMvc.perform(get("/api/v1/policies"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$").isEmpty)
+        every { service.getAllPolicies() } returns emptyFlow()
+        webTestClient.get().uri("/api/v1/policies")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$").isEmpty
     }
 
     // ── GET /api/v1/policies/{policyNo}/attributes ───────────
 
     @Test @DisplayName("GET /{policyNo}/attributes → 200 OK with attribute values")
     fun getAttributesForPolicy_success() {
-        whenever(service.getAttributesForPolicy("POL-001")).thenReturn(listOf(attrDto))
-        mockMvc.perform(get("/api/v1/policies/POL-001/attributes"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].attributeCode").value("STR_ATTR"))
-            .andExpect(jsonPath("$[0].attributeValue").value("hello"))
+        coEvery { service.getAttributesForPolicy("POL-001") } returns listOf(attrDto)
+        webTestClient.get().uri("/api/v1/policies/POL-001/attributes")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].attributeCode").isEqualTo("STR_ATTR")
+            .jsonPath("$[0].attributeValue").isEqualTo("hello")
     }
 
     @Test @DisplayName("GET /{policyNo}/attributes → 200 OK with empty list")
     fun getAttributesForPolicy_empty() {
-        whenever(service.getAttributesForPolicy("POL-EMPTY")).thenReturn(emptyList())
-        mockMvc.perform(get("/api/v1/policies/POL-EMPTY/attributes"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$").isEmpty)
+        coEvery { service.getAttributesForPolicy("POL-EMPTY") } returns emptyList()
+        webTestClient.get().uri("/api/v1/policies/POL-EMPTY/attributes")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$").isEmpty
     }
 
     // ── PUT /api/v1/policies/{policyNo}/attributes/{code} ────
 
     @Test @DisplayName("PUT /{policyNo}/attributes/{code} → 200 OK on success")
     fun updateValue_success() {
-        whenever(service.updateAttributeValue("POL-001", "STR_ATTR", "world")).thenReturn(attrDto)
-        mockMvc.perform(put("/api/v1/policies/POL-001/attributes/STR_ATTR")
+        coEvery { service.updateAttributeValue("POL-001", "STR_ATTR", "world") } returns attrDto
+        webTestClient.put().uri("/api/v1/policies/POL-001/attributes/STR_ATTR")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(mapOf("attributeValue" to "world"))))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.policyNo").value("POL-001"))
+            .bodyValue(mapOf("attributeValue" to "world"))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.policyNo").isEqualTo("POL-001")
     }
 
     @Test @DisplayName("PUT /{policyNo}/attributes/{code} → 404 when attribute not found")
     fun updateValue_attributeNotFound() {
-        whenever(service.updateAttributeValue(eq("POL-001"), eq("GHOST"), any()))
-            .thenThrow(ResourceNotFoundException("AttributeMaster", "GHOST"))
-        mockMvc.perform(put("/api/v1/policies/POL-001/attributes/GHOST")
+        coEvery { service.updateAttributeValue("POL-001", "GHOST", any()) } throws ResourceNotFoundException("AttributeMaster", "GHOST")
+        webTestClient.put().uri("/api/v1/policies/POL-001/attributes/GHOST")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(mapOf("attributeValue" to "val"))))
-            .andExpect(status().isNotFound)
+            .bodyValue(mapOf("attributeValue" to "val"))
+            .exchange()
+            .expectStatus().isNotFound
     }
 
     @Test @DisplayName("PUT /{policyNo}/attributes/{code} → 400 when validation fails")
     fun updateValue_validationFail() {
-        whenever(service.updateAttributeValue(eq("POL-001"), eq("NUM_ATTR"), any()))
-            .thenThrow(AttributeValidationException("NUM_ATTR", "Expected a valid number"))
-        mockMvc.perform(put("/api/v1/policies/POL-001/attributes/NUM_ATTR")
+        coEvery { service.updateAttributeValue("POL-001", "NUM_ATTR", any()) } throws AttributeValidationException("NUM_ATTR", "Expected a valid number")
+        webTestClient.put().uri("/api/v1/policies/POL-001/attributes/NUM_ATTR")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(mapOf("attributeValue" to "abc"))))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.status").value(400))
+            .bodyValue(mapOf("attributeValue" to "abc"))
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.status").isEqualTo(400)
     }
 
     // ── POST /api/v1/policies/{policyNo}/attributes ──────────
 
     @Test @DisplayName("POST /{policyNo}/attributes → 200 OK on bulk save")
     fun bulkSave_success() {
-        whenever(service.bulkSaveForPolicy(eq("POL-001"), any())).thenReturn(listOf(attrDto))
-        mockMvc.perform(post("/api/v1/policies/POL-001/attributes")
+        coEvery { service.bulkSaveForPolicy("POL-001", any()) } returns listOf(attrDto)
+        webTestClient.post().uri("/api/v1/policies/POL-001/attributes")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(listOf(attrDto))))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].attributeCode").value("STR_ATTR"))
+            .bodyValue(listOf(attrDto))
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].attributeCode").isEqualTo("STR_ATTR")
     }
 
     @Test @DisplayName("POST /{policyNo}/attributes → 400 when ARCHIVED attribute used")
     fun bulkSave_archivedAttribute() {
-        whenever(service.bulkSaveForPolicy(eq("POL-001"), any()))
-            .thenThrow(AttributeValidationException("ARC_ATTR", "Cannot assign values to ARCHIVED attribute"))
-        mockMvc.perform(post("/api/v1/policies/POL-001/attributes")
+        coEvery { service.bulkSaveForPolicy("POL-001", any()) } throws AttributeValidationException("ARC_ATTR", "Cannot assign values to ARCHIVED attribute")
+        webTestClient.post().uri("/api/v1/policies/POL-001/attributes")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(listOf(attrDto))))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value(containsString("ARCHIVED")))
+            .bodyValue(listOf(attrDto))
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.message").value(containsString("ARCHIVED"))
     }
 }

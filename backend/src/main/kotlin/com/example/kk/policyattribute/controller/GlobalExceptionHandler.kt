@@ -5,8 +5,8 @@ import com.example.kk.policyattribute.exception.ResourceNotFoundException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
-import org.springframework.orm.ObjectOptimisticLockingFailureException
-import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.dao.OptimisticLockingFailureException
+import org.springframework.web.bind.support.WebExchangeBindException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import java.time.Instant
@@ -34,11 +34,11 @@ class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.message ?: "Bad request")
     }
 
-    /** 400 — Bean validation failures (@Valid). */
-    @ExceptionHandler(MethodArgumentNotValidException::class)
-    fun handleBeanValidation(ex: MethodArgumentNotValidException): ResponseEntity<Map<String, Any>> {
+    /** 400 — Bean validation failures in WebFlux. */
+    @ExceptionHandler(WebExchangeBindException::class)
+    fun handleWebExchangeBind(ex: WebExchangeBindException): ResponseEntity<Map<String, Any>> {
         val details = ex.bindingResult.fieldErrors.joinToString("; ") { "${it.field}: ${it.defaultMessage}" }
-        log.warn("Bean validation error: {}", details)
+        log.warn("WebExchange validation error: {}", details)
         return buildResponse(HttpStatus.BAD_REQUEST, details)
     }
 
@@ -49,9 +49,9 @@ class GlobalExceptionHandler {
         return buildResponse(HttpStatus.NOT_FOUND, ex.message ?: "Not found")
     }
 
-    /** 409 — Optimistic locking conflict. */
-    @ExceptionHandler(ObjectOptimisticLockingFailureException::class)
-    fun handleOptimisticLock(ex: ObjectOptimisticLockingFailureException): ResponseEntity<Map<String, Any>> {
+    /** 409 — Optimistic locking conflict in Spring Data Relational/R2DBC. */
+    @ExceptionHandler(OptimisticLockingFailureException::class)
+    fun handleOptimisticLock(ex: OptimisticLockingFailureException): ResponseEntity<Map<String, Any>> {
         log.warn("Optimistic lock conflict: {}", ex.message)
         return buildResponse(HttpStatus.CONFLICT, "The record was modified by another user. Please refresh and try again.")
     }

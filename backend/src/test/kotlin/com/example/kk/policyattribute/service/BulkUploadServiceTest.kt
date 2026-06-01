@@ -8,30 +8,32 @@ import com.example.kk.policyattribute.model.DataType
 import com.example.kk.policyattribute.model.PolicyAttributeValue
 import com.example.kk.policyattribute.repository.AttributeMasterRepository
 import com.example.kk.policyattribute.repository.PolicyAttributeValueRepository
+import io.mockk.*
+import io.mockk.impl.annotations.InjectMockKs
+import io.mockk.impl.annotations.MockK
+import io.mockk.junit5.MockKExtension
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.ArgumentCaptor
-import org.mockito.InjectMocks
-import org.mockito.Mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.junit.jupiter.MockitoExtension
-import org.mockito.kotlin.*
-import org.springframework.mock.web.MockMultipartFile
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
+import org.springframework.http.codec.multipart.FilePart
+import reactor.core.publisher.Mono
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.time.Instant
-import java.util.Optional
 
-@ExtendWith(MockitoExtension::class)
+@ExtendWith(MockKExtension::class)
 @DisplayName("BulkUploadService Unit Tests")
 class BulkUploadServiceTest {
 
-    @Mock lateinit var valueRepository: PolicyAttributeValueRepository
-    @Mock lateinit var masterRepository: AttributeMasterRepository
-    @Mock lateinit var policyAttributeService: PolicyAttributeService
-    @InjectMocks lateinit var service: BulkUploadService
+    @MockK lateinit var valueRepository: PolicyAttributeValueRepository
+    @MockK lateinit var masterRepository: AttributeMasterRepository
+    @MockK lateinit var policyAttributeService: PolicyAttributeService
+    @InjectMockKs lateinit var service: BulkUploadService
 
     companion object {
         private const val HEADER = "policy_no,attribute_code,attribute_value\n"
@@ -43,30 +45,45 @@ class BulkUploadServiceTest {
         version = 1L, createdAt = Instant.now(), updatedAt = Instant.now(), createdBy = "system"
     )
 
-    private fun csvFile(content: String) = MockMultipartFile(
-        "file", "test.csv", "text/csv", content.toByteArray(StandardCharsets.UTF_8)
-    )
+    private fun mockFilePart(content: String): FilePart {
+        val filePart = mockk<FilePart>()
+        every { filePart.filename() } returns "test.csv"
+        
+        val headers = HttpHeaders()
+        headers.contentType = MediaType.parseMediaType("text/csv")
+        every { filePart.headers() } returns headers
+        
+        coEvery { filePart.transferTo(any<java.nio.file.Path>()) } coAnswers {
+            val path = firstArg<java.nio.file.Path>()
+            Files.write(path, content.toByteArray(StandardCharsets.UTF_8))
+            Mono.empty<Void>()
+        }
+        return filePart
+    }
 
     // ── Empty / Malformed CSV ────────────────────────────────
 
     @Test @DisplayName("Empty CSV file (no header) → throws AttributeValidationException")
     fun emptyCsv_throws() {
-        assertThatThrownBy { service.processCsv(csvFile("")) }
+        val filePart = mockFilePart("")
+        assertThatThrownBy { runBlocking { service.processCsv(filePart) } }
             .isInstanceOf(AttributeValidationException::class.java)
             .hasMessageContaining("empty")
     }
 
     @Test @DisplayName("Header only → totalRows=0, successCount=0, no errors")
-    fun headerOnlyCsv_returnsZeroCounts() {
-        val result = service.processCsv(csvFile(HEADER))
+    fun headerOnlyCsv_returnsZeroCounts() = runBlocking {
+        val filePart = mockFilePart(HEADER)
+        val result = service.processCsv(filePart)
         assertThat(result.totalRows).isZero()
         assertThat(result.successCount).isZero()
         assertThat(result.errors).isEmpty()
     }
 
     @Test @DisplayName("Row with fewer than 3 columns → records row error, continues")
-    fun rowTooFewColumns_recordsError() {
-        val result = service.processCsv(csvFile(HEADER + "POL-001,STR_ATTR\n"))
+    fun rowTooFewColumns_recordsError() = runBlocking {
+        val filePart = mockFilePart(HEADER + "POL-001,STR_ATTR\n")
+        val result = service.processCsv(filePart)
         assertThat(result.errorCount).isEqualTo(1)
         assertThat(result.errors[0].errorMessage).contains("fewer than 3 columns")
         assertThat(result.successCount).isZero()
@@ -75,44 +92,47 @@ class BulkUploadServiceTest {
     // ── Attribute Not Found ──────────────────────────────────
 
     @Test @DisplayName("Unknown attribute code → records ResourceNotFoundException error, continues")
-    fun unknownAttributeCode_recordsError() {
+    fun unknownAttributeCode_recordsError() = runBlocking {
         val csv = HEADER + "POL-001,MISSING_CODE,val\n"
-        whenever(masterRepository.findById("MISSING_CODE")).thenReturn(Optional.empty())
+        val filePart = mockFilePart(csv)
+        coEvery { masterRepository.findById("MISSING_CODE") } returns null
 
-        val result = service.processCsv(csvFile(csv))
+        val result = service.processCsv(filePart)
 
         assertThat(result.errorCount).isEqualTo(1)
         assertThat(result.errors[0].attributeCode).isEqualTo("MISSING_CODE")
-        @Suppress("UNCHECKED_CAST")
-        verify(valueRepository, never()).saveAll(any<Iterable<PolicyAttributeValue>>())
+        verify(exactly = 0) { valueRepository.saveAll(any<Iterable<PolicyAttributeValue>>()) }
     }
 
     // ── Validation Failures ──────────────────────────────────
 
     @Test @DisplayName("Data-type validation failure → records error and continues")
-    fun dataTypeValidationFail_recordsError() {
+    fun dataTypeValidationFail_recordsError() = runBlocking {
+        val csv = HEADER + "POL-001,NUM_ATTR,abc\n"
+        val filePart = mockFilePart(csv)
         val master = buildMaster("NUM_ATTR", DataType.NUMBER)
-        whenever(masterRepository.findById("NUM_ATTR")).thenReturn(Optional.of(master))
-        doThrow(AttributeValidationException("NUM_ATTR", "Expected a valid number but got: abc"))
-            .whenever(policyAttributeService).validateDataType(master, "abc")
+        coEvery { masterRepository.findById("NUM_ATTR") } returns master
+        every { policyAttributeService.validateDataType(master, "abc") } throws 
+            AttributeValidationException("NUM_ATTR", "Expected a valid number but got: abc")
 
-        val result = service.processCsv(csvFile(HEADER + "POL-001,NUM_ATTR,abc\n"))
+        val result = service.processCsv(filePart)
 
         assertThat(result.errorCount).isEqualTo(1)
         assertThat(result.errors[0].errorMessage).contains("Expected a valid number")
-        @Suppress("UNCHECKED_CAST")
-        verify(valueRepository, never()).saveAll(any<Iterable<PolicyAttributeValue>>())
+        verify(exactly = 0) { valueRepository.saveAll(any<Iterable<PolicyAttributeValue>>()) }
     }
 
     @Test @DisplayName("Regex validation failure → records error and continues")
-    fun regexValidationFail_recordsError() {
+    fun regexValidationFail_recordsError() = runBlocking {
+        val csv = HEADER + "POL-001,STR_ATTR,WRONG\n"
+        val filePart = mockFilePart(csv)
         val master = buildMaster("STR_ATTR", DataType.STRING)
-        whenever(masterRepository.findById("STR_ATTR")).thenReturn(Optional.of(master))
-        doNothing().whenever(policyAttributeService).validateDataType(master, "WRONG")
-        doThrow(AttributeValidationException("STR_ATTR", "Does not match regex"))
-            .whenever(policyAttributeService).validateValueAgainstRegex(master, "WRONG")
+        coEvery { masterRepository.findById("STR_ATTR") } returns master
+        every { policyAttributeService.validateDataType(master, "WRONG") } returns Unit
+        every { policyAttributeService.validateValueAgainstRegex(master, "WRONG") } throws 
+            AttributeValidationException("STR_ATTR", "Does not match regex")
 
-        val result = service.processCsv(csvFile(HEADER + "POL-001,STR_ATTR,WRONG\n"))
+        val result = service.processCsv(filePart)
 
         assertThat(result.errorCount).isEqualTo(1)
         assertThat(result.errors[0].errorMessage).contains("regex")
@@ -121,73 +141,75 @@ class BulkUploadServiceTest {
     // ── Mixed Rows ───────────────────────────────────────────
 
     @Test @DisplayName("Mix of valid and invalid rows → saves valid only, reports all errors")
-    fun mixedRows_savesValidAndReportsErrors() {
-        val strMaster = buildMaster("STR_ATTR", DataType.STRING)
-        val numMaster = buildMaster("NUM_ATTR", DataType.NUMBER)
-
-        whenever(masterRepository.findById("STR_ATTR")).thenReturn(Optional.of(strMaster))
-        doNothing().whenever(policyAttributeService).validateDataType(strMaster, "valid_value")
-        doNothing().whenever(policyAttributeService).validateValueAgainstRegex(strMaster, "valid_value")
-
-        whenever(masterRepository.findById("NUM_ATTR")).thenReturn(Optional.of(numMaster))
-        doThrow(AttributeValidationException("NUM_ATTR", "Expected a valid number but got: bad"))
-            .whenever(policyAttributeService).validateDataType(numMaster, "bad")
-
+    fun mixedRows_savesValidAndReportsErrors() = runBlocking {
         val csv = HEADER +
                 "POL-001,STR_ATTR,valid_value\n" +
                 "POL-002,NUM_ATTR,bad\n" +
                 "POL-003,MISSING\n"
+        val filePart = mockFilePart(csv)
+        val strMaster = buildMaster("STR_ATTR", DataType.STRING)
+        val numMaster = buildMaster("NUM_ATTR", DataType.NUMBER)
 
-        val result = service.processCsv(csvFile(csv))
+        coEvery { masterRepository.findById("STR_ATTR") } returns strMaster
+        every { policyAttributeService.validateDataType(strMaster, "valid_value") } returns Unit
+        every { policyAttributeService.validateValueAgainstRegex(strMaster, "valid_value") } returns Unit
+
+        coEvery { masterRepository.findById("NUM_ATTR") } returns numMaster
+        every { policyAttributeService.validateDataType(numMaster, "bad") } throws 
+            AttributeValidationException("NUM_ATTR", "Expected a valid number but got: bad")
+
+        val slot = slot<Iterable<PolicyAttributeValue>>()
+        every { valueRepository.saveAll(capture(slot)) } answers { (firstArg<Iterable<PolicyAttributeValue>>()).asFlow() }
+
+        val result = service.processCsv(filePart)
 
         assertThat(result.totalRows).isEqualTo(3)
         assertThat(result.successCount).isEqualTo(1)
         assertThat(result.errorCount).isEqualTo(2)
 
-        @Suppress("UNCHECKED_CAST")
-        val captor = ArgumentCaptor.forClass(Iterable::class.java) as ArgumentCaptor<Iterable<PolicyAttributeValue>>
-        verify(valueRepository).saveAll(captor.capture())
-        assertThat(captor.value.toList()).hasSize(1)
+        assertThat(slot.captured.toList()).hasSize(1)
     }
 
     // ── All Valid ────────────────────────────────────────────
 
     @Test @DisplayName("All valid rows → saves all via saveAll, zero errors")
-    fun allValid_savesAll() {
-        val master = buildMaster("STR_ATTR", DataType.STRING)
-        whenever(masterRepository.findById("STR_ATTR")).thenReturn(Optional.of(master))
-        doNothing().whenever(policyAttributeService).validateDataType(any(), any())
-        doNothing().whenever(policyAttributeService).validateValueAgainstRegex(any(), any())
-
+    fun allValid_savesAll() = runBlocking {
         val csv = HEADER + "POL-001,STR_ATTR,hello\n" + "POL-002,STR_ATTR,world\n"
-        val result = service.processCsv(csvFile(csv))
+        val filePart = mockFilePart(csv)
+        val master = buildMaster("STR_ATTR", DataType.STRING)
+        coEvery { masterRepository.findById("STR_ATTR") } returns master
+        every { policyAttributeService.validateDataType(any(), any()) } returns Unit
+        every { policyAttributeService.validateValueAgainstRegex(any(), any()) } returns Unit
+
+        val slot = slot<Iterable<PolicyAttributeValue>>()
+        every { valueRepository.saveAll(capture(slot)) } answers { (firstArg<Iterable<PolicyAttributeValue>>()).asFlow() }
+
+        val result = service.processCsv(filePart)
 
         assertThat(result.totalRows).isEqualTo(2)
         assertThat(result.successCount).isEqualTo(2)
         assertThat(result.errorCount).isZero()
 
-        @Suppress("UNCHECKED_CAST")
-        val captor = ArgumentCaptor.forClass(Iterable::class.java) as ArgumentCaptor<Iterable<PolicyAttributeValue>>
-        verify(valueRepository).saveAll(captor.capture())
-        assertThat(captor.value.toList()).hasSize(2)
+        assertThat(slot.captured.toList()).hasSize(2)
     }
 
     @Test @DisplayName("All invalid rows → never calls saveAll, all errors reported")
-    fun allInvalid_neverSaves() {
+    fun allInvalid_neverSaves() = runBlocking {
         val csv = HEADER + "POL-001,BAD\n" + "POL-002,ALSO_BAD\n"
-        val result = service.processCsv(csvFile(csv))
+        val filePart = mockFilePart(csv)
+        val result = service.processCsv(filePart)
         assertThat(result.successCount).isZero()
         assertThat(result.errorCount).isEqualTo(2)
-        @Suppress("UNCHECKED_CAST")
-        verify(valueRepository, never()).saveAll(any<Iterable<PolicyAttributeValue>>())
+        verify(exactly = 0) { valueRepository.saveAll(any<Iterable<PolicyAttributeValue>>()) }
     }
 
     // ── Row number accounting ─────────────────────────────────
 
     @Test @DisplayName("Row numbers in errors reflect header offset (+1)")
-    fun rowNumbers_reflectHeaderOffset() {
+    fun rowNumbers_reflectHeaderOffset() = runBlocking {
         val csv = HEADER + "P1,ONLY_TWO\n" + "P2,ALSO_TWO\n"
-        val result = service.processCsv(csvFile(csv))
+        val filePart = mockFilePart(csv)
+        val result = service.processCsv(filePart)
         assertThat(result.errors[0].rowNumber).isEqualTo(2)
         assertThat(result.errors[1].rowNumber).isEqualTo(3)
     }

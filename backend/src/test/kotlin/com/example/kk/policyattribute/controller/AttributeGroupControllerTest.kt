@@ -3,32 +3,24 @@ package com.example.kk.policyattribute.controller
 import com.example.kk.policyattribute.dto.AttributeGroupDto
 import com.example.kk.policyattribute.model.AttributeStatus
 import com.example.kk.policyattribute.service.AttributeGroupService
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
+import io.mockk.coEvery
+import io.mockk.every
+import kotlinx.coroutines.flow.asFlow
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.any
-import org.mockito.kotlin.eq
-import org.mockito.kotlin.whenever
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
-import org.springframework.boot.test.mock.mockito.MockBean
+import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.reactive.server.WebTestClient
 
-@WebMvcTest(AttributeGroupController::class)
+@WebFluxTest(AttributeGroupController::class)
 @DisplayName("AttributeGroupController Web Layer Tests")
 class AttributeGroupControllerTest {
 
-    @Autowired lateinit var mockMvc: MockMvc
-    @MockBean lateinit var service: AttributeGroupService
-    @Autowired lateinit var objectMapper: ObjectMapper
+    @Autowired lateinit var webTestClient: WebTestClient
+    @MockkBean lateinit var service: AttributeGroupService
 
     lateinit var sampleDto: AttributeGroupDto
 
@@ -45,54 +37,65 @@ class AttributeGroupControllerTest {
 
     @Test @DisplayName("GET /api/v1/attribute-groups → 200 OK with list")
     fun list_returnsOk() {
-        whenever(service.listGroups(false)).thenReturn(listOf(sampleDto))
-        mockMvc.perform(get("/api/v1/attribute-groups"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].code").value("CONSENT"))
-            .andExpect(jsonPath("$[0].displayNameEn").value("Consent"))
-            .andExpect(jsonPath("$[0].displayNameTh").value("ความยินยอม (Consent)"))
+        every { service.listGroups(false) } returns listOf(sampleDto).asFlow()
+        webTestClient.get().uri("/api/v1/attribute-groups")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].code").isEqualTo("CONSENT")
+            .jsonPath("$[0].displayNameEn").isEqualTo("Consent")
+            .jsonPath("$[0].displayNameTh").isEqualTo("ความยินยอม (Consent)")
     }
 
     @Test @DisplayName("GET /api/v1/attribute-groups?includeArchived=true → 200 OK with all list")
     fun listWithArchived_returnsOk() {
-        whenever(service.listGroups(true)).thenReturn(listOf(sampleDto))
-        mockMvc.perform(get("/api/v1/attribute-groups").param("includeArchived", "true"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].code").value("CONSENT"))
+        every { service.listGroups(true) } returns listOf(sampleDto).asFlow()
+        webTestClient.get().uri("/api/v1/attribute-groups?includeArchived=true")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$[0].code").isEqualTo("CONSENT")
     }
 
     @Test @DisplayName("GET /api/v1/attribute-groups/{code} → 200 OK")
     fun getByCode_returnsOk() {
-        whenever(service.getByCode("CONSENT")).thenReturn(sampleDto)
-        mockMvc.perform(get("/api/v1/attribute-groups/CONSENT"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.code").value("CONSENT"))
+        coEvery { service.getByCode("CONSENT") } returns sampleDto
+        webTestClient.get().uri("/api/v1/attribute-groups/CONSENT")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("CONSENT")
     }
 
     @Test @DisplayName("POST /api/v1/attribute-groups → 201 Created")
     fun create_returnsCreated() {
-        whenever(service.create(any())).thenReturn(sampleDto)
-        mockMvc.perform(post("/api/v1/attribute-groups")
+        coEvery { service.create(any()) } returns sampleDto
+        webTestClient.post().uri("/api/v1/attribute-groups")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(sampleDto)))
-            .andExpect(status().isCreated)
-            .andExpect(jsonPath("$.code").value("CONSENT"))
+            .bodyValue(sampleDto)
+            .exchange()
+            .expectStatus().isCreated
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("CONSENT")
     }
 
     @Test @DisplayName("PUT /api/v1/attribute-groups/{code} → 200 OK")
     fun update_returnsOk() {
-        whenever(service.update(eq("CONSENT"), any())).thenReturn(sampleDto)
-        mockMvc.perform(put("/api/v1/attribute-groups/CONSENT")
+        coEvery { service.update("CONSENT", any()) } returns sampleDto
+        webTestClient.put().uri("/api/v1/attribute-groups/CONSENT")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(sampleDto)))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.code").value("CONSENT"))
+            .bodyValue(sampleDto)
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("CONSENT")
     }
 
     @Test @DisplayName("DELETE /api/v1/attribute-groups/{code} → 204 No Content")
     fun delete_returnsNoContent() {
-        mockMvc.perform(delete("/api/v1/attribute-groups/CONSENT"))
-            .andExpect(status().isNoContent)
+        coEvery { service.softDelete("CONSENT") } returns Unit
+        webTestClient.delete().uri("/api/v1/attribute-groups/CONSENT")
+            .exchange()
+            .expectStatus().isNoContent
     }
 }
-

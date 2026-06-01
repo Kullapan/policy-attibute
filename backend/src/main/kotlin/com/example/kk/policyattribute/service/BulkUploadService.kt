@@ -4,16 +4,20 @@ import com.example.kk.policyattribute.dto.BulkUploadResultDto
 import com.example.kk.policyattribute.exception.AttributeValidationException
 import com.example.kk.policyattribute.exception.ResourceNotFoundException
 import com.example.kk.policyattribute.model.PolicyAttributeValue
-import com.example.kk.policyattribute.model.PolicyAttributeValueId
 import com.example.kk.policyattribute.repository.AttributeMasterRepository
 import com.example.kk.policyattribute.repository.PolicyAttributeValueRepository
 import com.opencsv.CSVReader
 import org.slf4j.LoggerFactory
+import org.springframework.http.codec.multipart.FilePart
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.web.multipart.MultipartFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.withContext
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 
 /**
  * Service for bulk CSV upload of policy attribute values.
@@ -31,54 +35,67 @@ class BulkUploadService(
     private val log = LoggerFactory.getLogger(BulkUploadService::class.java)
 
     @Transactional
-    fun processCsv(file: MultipartFile): BulkUploadResultDto {
+    suspend fun processCsv(file: FilePart): BulkUploadResultDto {
         val errors = mutableListOf<BulkUploadResultDto.RowError>()
         val validEntities = mutableListOf<PolicyAttributeValue>()
         var totalRows = 0
 
+        // Create a temporary file to save the uploaded content
+        val tempFile = withContext(Dispatchers.IO) {
+            Files.createTempFile("upload-", ".csv")
+        }
+
         try {
-            CSVReader(InputStreamReader(file.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                // Skip header row
-                reader.readNext() ?: throw AttributeValidationException("CSV file is empty")
+            // Write FilePart content to the temporary file reactively
+            file.transferTo(tempFile).awaitSingleOrNull()
 
-                var row: Array<String>?
-                while (reader.readNext().also { row = it } != null) {
-                    totalRows++
-                    val rowNum = totalRows + 1 // +1 for header offset
-                    val r = row!!
+            withContext(Dispatchers.IO) {
+                CSVReader(InputStreamReader(Files.newInputStream(tempFile), StandardCharsets.UTF_8)).use { reader ->
+                    // Skip header row
+                    reader.readNext() ?: throw AttributeValidationException("CSV file is empty")
 
-                    if (r.size < 3) {
-                        errors += BulkUploadResultDto.RowError(
-                            rowNumber    = rowNum,
-                            errorMessage = "Row has fewer than 3 columns"
-                        )
-                        continue
-                    }
+                    var row: Array<String>?
+                    while (reader.readNext().also { row = it } != null) {
+                        totalRows++
+                        val rowNum = totalRows + 1 // +1 for header offset
+                        val r = row!!
 
-                    val policyNo       = sanitizeCsvCell(r[0].trim())
-                    val attributeCode  = sanitizeCsvCell(r[1].trim())
-                    val attributeValue = sanitizeCsvCell(r[2].trim())
+                        if (r.size < 3) {
+                            errors += BulkUploadResultDto.RowError(
+                                rowNumber    = rowNum,
+                                errorMessage = "Row has fewer than 3 columns"
+                            )
+                            continue
+                        }
 
-                    try {
-                        val master = masterRepository.findById(attributeCode)
-                            .orElseThrow { ResourceNotFoundException("AttributeMaster", attributeCode) }
+                        val policyNo       = sanitizeCsvCell(r[0].trim())
+                        val attributeCode  = sanitizeCsvCell(r[1].trim())
+                        val attributeValue = sanitizeCsvCell(r[2].trim())
 
-                        policyAttributeService.validateDataType(master, attributeValue)
-                        policyAttributeService.validateValueAgainstRegex(master, attributeValue)
+                        try {
+                            val master = masterRepository.findById(attributeCode)
+                                ?: throw ResourceNotFoundException("AttributeMaster", attributeCode)
 
-                        val id = PolicyAttributeValueId(policyNo, attributeCode)
-                        validEntities += PolicyAttributeValue(id = id, attributeValue = attributeValue)
+                            policyAttributeService.validateDataType(master, attributeValue)
+                            policyAttributeService.validateValueAgainstRegex(master, attributeValue)
 
-                    } catch (e: Exception) {
-                        when (e) {
-                            is ResourceNotFoundException, is AttributeValidationException ->
-                                errors += BulkUploadResultDto.RowError(
-                                    rowNumber     = rowNum,
-                                    policyNo      = policyNo,
-                                    attributeCode = attributeCode,
-                                    errorMessage  = e.message
-                                )
-                            else -> throw e
+                            validEntities += PolicyAttributeValue(
+                                policyNo = policyNo,
+                                attributeCode = attributeCode,
+                                attributeValue = attributeValue
+                            )
+
+                        } catch (e: Exception) {
+                            when (e) {
+                                is ResourceNotFoundException, is AttributeValidationException ->
+                                    errors += BulkUploadResultDto.RowError(
+                                        rowNumber     = rowNum,
+                                        policyNo      = policyNo,
+                                        attributeCode = attributeCode,
+                                        errorMessage  = e.message
+                                    )
+                                else -> throw e
+                            }
                         }
                     }
                 }
@@ -87,10 +104,15 @@ class BulkUploadService(
             throw e
         } catch (e: Exception) {
             throw AttributeValidationException("Failed to parse CSV file: ${e.message}")
+        } finally {
+            withContext(Dispatchers.IO) {
+                Files.deleteIfExists(tempFile)
+            }
         }
 
         if (validEntities.isNotEmpty()) {
-            valueRepository.saveAll(validEntities)
+            // Spring Data R2DBC saveAll returns Flow, must collect it to execute inserts.
+            valueRepository.saveAll(validEntities).collect()
             log.info("Bulk upload: saved {} records", validEntities.size)
         }
 

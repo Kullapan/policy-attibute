@@ -8,6 +8,7 @@ import com.example.kk.policyattribute.service.PolicyAttributeService
 import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import kotlinx.coroutines.flow.Flow
 
 /**
  * REST controller for Policy-Attribute value mapping operations.
@@ -22,14 +23,14 @@ class PolicyAttributeController(
      * Create a new policy with optional initial attributes.
      */
     @PostMapping("/create")
-    fun createPolicy(@Valid @RequestBody request: CreatePolicyRequestDto): ResponseEntity<List<PolicyAttributeValueDto>> =
+    suspend fun createPolicy(@Valid @RequestBody request: CreatePolicyRequestDto): ResponseEntity<List<PolicyAttributeValueDto>> =
         ResponseEntity.ok(service.createPolicyWithAttributes(request))
 
     /**
      * Get all attribute values for a specific policy.
      */
     @GetMapping("/{policyNo}/attributes")
-    fun getAttributesForPolicy(@PathVariable policyNo: String): ResponseEntity<List<PolicyAttributeValueDto>> =
+    suspend fun getAttributesForPolicy(@PathVariable policyNo: String): ResponseEntity<List<PolicyAttributeValueDto>> =
         ResponseEntity.ok(service.getAttributesForPolicy(policyNo))
 
     /**
@@ -37,7 +38,7 @@ class PolicyAttributeController(
      * Request body: { "attributeValue": "..." }
      */
     @PutMapping("/{policyNo}/attributes/{attributeCode}")
-    fun updateValue(
+    suspend fun updateValue(
         @PathVariable policyNo: String,
         @PathVariable attributeCode: String,
         @Valid @RequestBody request: UpdateAttributeValueRequestDto
@@ -48,14 +49,14 @@ class PolicyAttributeController(
      * Get all policies.
      */
     @GetMapping("")
-    fun getAllPolicies(): ResponseEntity<List<PolicyMaster>> =
+    fun getAllPolicies(): ResponseEntity<Flow<PolicyMaster>> =
         ResponseEntity.ok(service.getAllPolicies())
 
     /**
      * Bulk save attribute values for a policy.
      */
     @PostMapping("/{policyNo}/attributes")
-    fun bulkSave(
+    suspend fun bulkSave(
         @PathVariable policyNo: String,
         @Valid @RequestBody dtos: List<PolicyAttributeValueDto>
     ): ResponseEntity<List<PolicyAttributeValueDto>> =

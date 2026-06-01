@@ -1,17 +1,25 @@
 package com.example.kk.policyattribute.repository
 
 import com.example.kk.policyattribute.model.PolicyAttributeValue
-import com.example.kk.policyattribute.model.PolicyAttributeValueId
-import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
+import kotlinx.coroutines.flow.Flow
 import org.springframework.stereotype.Repository
-import org.springframework.transaction.annotation.Transactional
 
 @Repository
-interface PolicyAttributeValueRepository :
-    JpaRepository<PolicyAttributeValue, PolicyAttributeValueId> {
+interface PolicyAttributeValueRepository : CoroutineCrudRepository<PolicyAttributeValue, Long> {
 
-    fun findByIdPolicyNo(policyNo: String): List<PolicyAttributeValue>
+    /**
+     * Find values associated with a specific policy number.
+     */
+    fun findByPolicyNo(policyNo: String): Flow<PolicyAttributeValue>
 
-    @Transactional
-    fun deleteByIdPolicyNoAndIdAttributeCode(policyNo: String, attributeCode: String)
+    /**
+     * Find a specific attribute value for a policy.
+     */
+    suspend fun findByPolicyNoAndAttributeCode(policyNo: String, attributeCode: String): PolicyAttributeValue?
+
+    /**
+     * Delete a specific attribute value for a policy.
+     */
+    suspend fun deleteByPolicyNoAndAttributeCode(policyNo: String, attributeCode: String)
 }

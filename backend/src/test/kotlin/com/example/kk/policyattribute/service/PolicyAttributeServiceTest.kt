@@ -8,35 +8,30 @@ import com.example.kk.policyattribute.model.*
 import com.example.kk.policyattribute.repository.AttributeMasterRepository
 import com.example.kk.policyattribute.repository.PolicyAttributeValueRepository
 import com.example.kk.policyattribute.repository.PolicyMasterRepository
+import io.mockk.*
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.InjectMocks
-import org.mockito.Mock
-import org.mockito.junit.jupiter.MockitoExtension
-import org.mockito.kotlin.any
-import org.mockito.kotlin.verify
-import org.mockito.kotlin.whenever
 import java.time.Instant
-import java.util.Optional
 
-@ExtendWith(MockitoExtension::class)
 @DisplayName("PolicyAttributeService Unit Tests")
 class PolicyAttributeServiceTest {
 
-    @Mock lateinit var valueRepository: PolicyAttributeValueRepository
-    @Mock lateinit var masterRepository: AttributeMasterRepository
-    @Mock lateinit var policyMasterRepository: PolicyMasterRepository
-    @InjectMocks lateinit var service: PolicyAttributeService
+    private val valueRepository = mockk<PolicyAttributeValueRepository>()
+    private val masterRepository = mockk<AttributeMasterRepository>()
+    private val policyMasterRepository = mockk<PolicyMasterRepository>()
+    private val service = PolicyAttributeService(valueRepository, masterRepository, policyMasterRepository)
 
-    lateinit var stringMaster: AttributeMaster
-    lateinit var numberMaster: AttributeMaster
-    lateinit var dateMaster: AttributeMaster
-    lateinit var boolMaster: AttributeMaster
-    lateinit var requiredMaster: AttributeMaster
-    lateinit var regexMaster: AttributeMaster
+    private lateinit var stringMaster: AttributeMaster
+    private lateinit var numberMaster: AttributeMaster
+    private lateinit var dateMaster: AttributeMaster
+    private lateinit var boolMaster: AttributeMaster
+    private lateinit var requiredMaster: AttributeMaster
+    private lateinit var regexMaster: AttributeMaster
 
     @BeforeEach
     fun setUp() {
@@ -58,7 +53,9 @@ class PolicyAttributeServiceTest {
 
     private fun buildValue(policyNo: String, code: String, val_: String) =
         PolicyAttributeValue(
-            id = PolicyAttributeValueId(policyNo, code),
+            id = 100L,
+            policyNo = policyNo,
+            attributeCode = code,
             attributeValue = val_,
             createdAt = Instant.now(), updatedAt = Instant.now(), createdBy = "system"
         )
@@ -67,120 +64,141 @@ class PolicyAttributeServiceTest {
 
     @Test @DisplayName("New policy with attributes → saves PolicyMaster and returns attribute list")
     fun createPolicy_newPolicyWithAttributes() {
-        val attrDto = PolicyAttributeValueDto(attributeCode = "STR_ATTR", attributeValue = "hello")
-        val req = CreatePolicyRequestDto(policyNo = "POL-001", attributes = listOf(attrDto))
+        runBlocking {
+            val attrDto = PolicyAttributeValueDto(attributeCode = "STR_ATTR", attributeValue = "hello")
+            val req = CreatePolicyRequestDto(policyNo = "POL-001", attributes = listOf(attrDto))
 
-        whenever(policyMasterRepository.existsById("POL-001")).thenReturn(false)
-        whenever(masterRepository.findById("STR_ATTR")).thenReturn(Optional.of(stringMaster))
-        val savedVal = buildValue("POL-001", "STR_ATTR", "hello")
-        val savedPolicy = PolicyMaster(policyNo = "POL-001")
-        whenever(policyMasterRepository.save(any<PolicyMaster>())).thenReturn(savedPolicy)
-        whenever(valueRepository.findById(any())).thenReturn(Optional.empty())
-        whenever(valueRepository.save(any<PolicyAttributeValue>())).thenReturn(savedVal)
+            coEvery { policyMasterRepository.existsById("POL-001") } returns false
+            coEvery { masterRepository.findById("STR_ATTR") } returns stringMaster
+            val savedVal = buildValue("POL-001", "STR_ATTR", "hello")
+            val savedPolicy = PolicyMaster(policyNo = "POL-001")
+            
+            coEvery { policyMasterRepository.save(any()) } returns savedPolicy
+            coEvery { valueRepository.findByPolicyNoAndAttributeCode("POL-001", "STR_ATTR") } returns null
+            coEvery { valueRepository.save(any()) } returns savedVal
 
-        val result = service.createPolicyWithAttributes(req)
-        verify(policyMasterRepository).save(any<PolicyMaster>())
-        assertThat(result).hasSize(1)
+            val result = service.createPolicyWithAttributes(req)
+            coVerify(exactly = 1) { policyMasterRepository.save(any()) }
+            assertThat(result).hasSize(1)
+        }
     }
 
     @Test @DisplayName("New policy with null attributes → saves PolicyMaster and returns empty list")
     fun createPolicy_noAttributes() {
-        val req = CreatePolicyRequestDto(policyNo = "POL-002", attributes = null)
-        whenever(policyMasterRepository.existsById("POL-002")).thenReturn(false)
-        whenever(policyMasterRepository.save(any<PolicyMaster>())).thenReturn(PolicyMaster(policyNo = "POL-002"))
+        runBlocking {
+            val req = CreatePolicyRequestDto(policyNo = "POL-002", attributes = null)
+            coEvery { policyMasterRepository.existsById("POL-002") } returns false
+            coEvery { policyMasterRepository.save(any()) } returns PolicyMaster(policyNo = "POL-002")
 
-        val result = service.createPolicyWithAttributes(req)
-        verify(policyMasterRepository).save(any<PolicyMaster>())
-        assertThat(result).isEmpty()
+            val result = service.createPolicyWithAttributes(req)
+            coVerify(exactly = 1) { policyMasterRepository.save(any()) }
+            assertThat(result).isEmpty()
+        }
     }
 
     @Test @DisplayName("Existing policy → throws IllegalArgumentException")
     fun createPolicy_alreadyExists() {
-        val req = CreatePolicyRequestDto(policyNo = "POL-001")
-        whenever(policyMasterRepository.existsById("POL-001")).thenReturn(true)
+        runBlocking {
+            val req = CreatePolicyRequestDto(policyNo = "POL-001")
+            coEvery { policyMasterRepository.existsById("POL-001") } returns true
 
-        assertThatThrownBy { service.createPolicyWithAttributes(req) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("POL-001")
+            assertThatThrownBy { runBlocking { service.createPolicyWithAttributes(req) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("POL-001")
+        }
     }
 
     // ── getAllPolicies ───────────────────────────────────────
 
     @Test @DisplayName("Returns all policies from repository")
     fun getAllPolicies_returnsList() {
-        val pm = PolicyMaster(policyNo = "POL-001")
-        whenever(policyMasterRepository.findAll()).thenReturn(listOf(pm))
+        runBlocking {
+            val pm = PolicyMaster(policyNo = "POL-001")
+            every { policyMasterRepository.findAll() } returns listOf(pm).asFlow()
 
-        val result = service.getAllPolicies()
-        assertThat(result).hasSize(1)
-        assertThat(result.first().policyNo).isEqualTo("POL-001")
+            val result = service.getAllPolicies().toList()
+            assertThat(result).hasSize(1)
+            assertThat(result.first().policyNo).isEqualTo("POL-001")
+        }
     }
 
     // ── getAttributesForPolicy ──────────────────────────────
 
     @Test @DisplayName("Retrieves all attribute values for a given policyNo")
     fun getAttributesForPolicy_returnsMapped() {
-        val pav = buildValue("POL-001", "STR_ATTR", "hello")
-        whenever(valueRepository.findByIdPolicyNo("POL-001")).thenReturn(listOf(pav))
+        runBlocking {
+            val pav = buildValue("POL-001", "STR_ATTR", "hello")
+            every { valueRepository.findByPolicyNo("POL-001") } returns listOf(pav).asFlow()
+            every { masterRepository.findAll() } returns listOf(stringMaster).asFlow()
 
-        val result = service.getAttributesForPolicy("POL-001")
-        assertThat(result).hasSize(1)
-        assertThat(result[0].policyNo).isEqualTo("POL-001")
-        assertThat(result[0].attributeCode).isEqualTo("STR_ATTR")
+            val result = service.getAttributesForPolicy("POL-001")
+            assertThat(result).hasSize(1)
+            assertThat(result[0].policyNo).isEqualTo("POL-001")
+            assertThat(result[0].attributeCode).isEqualTo("STR_ATTR")
+        }
     }
 
     @Test @DisplayName("getAttributesForPolicy → maps groupCode from AttributeGroup")
     fun getAttributesForPolicy_mapsGroupCode() {
-        val group = AttributeGroup(code = "CONSENT", displayNameEn = "Consent", displayNameTh = "ความยินยอม")
-        val master = buildMaster("STR_ATTR", DataType.STRING, false, null, null).apply {
-            attributeGroup = group
-        }
-        val pav = buildValue("POL-001", "STR_ATTR", "hello").apply {
-            attributeMaster = master
-        }
-        whenever(valueRepository.findByIdPolicyNo("POL-001")).thenReturn(listOf(pav))
+        runBlocking {
+            val master = buildMaster("STR_ATTR", DataType.STRING, false, null, null).apply {
+                groupCode = "CONSENT"
+            }
+            val pav = buildValue("POL-001", "STR_ATTR", "hello")
+            every { valueRepository.findByPolicyNo("POL-001") } returns listOf(pav).asFlow()
+            every { masterRepository.findAll() } returns listOf(master).asFlow()
 
-        val result = service.getAttributesForPolicy("POL-001")
-        assertThat(result).hasSize(1)
-        assertThat(result[0].groupCode).isEqualTo("CONSENT")
+            val result = service.getAttributesForPolicy("POL-001")
+            assertThat(result).hasSize(1)
+            assertThat(result[0].groupCode).isEqualTo("CONSENT")
+        }
     }
 
     @Test @DisplayName("Policy with no attributes → returns empty list")
     fun getAttributesForPolicy_empty() {
-        whenever(valueRepository.findByIdPolicyNo("POL-EMPTY")).thenReturn(emptyList())
-        assertThat(service.getAttributesForPolicy("POL-EMPTY")).isEmpty()
+        runBlocking {
+            every { valueRepository.findByPolicyNo("POL-EMPTY") } returns emptyList<PolicyAttributeValue>().asFlow()
+            every { masterRepository.findAll() } returns emptyList<AttributeMaster>().asFlow()
+            assertThat(service.getAttributesForPolicy("POL-EMPTY")).isEmpty()
+        }
     }
 
     // ── updateAttributeValue ────────────────────────────────
 
     @Test @DisplayName("Valid STRING value → saves and returns DTO")
     fun update_string_valid() {
-        whenever(masterRepository.findById("STR_ATTR")).thenReturn(Optional.of(stringMaster))
-        val pav = buildValue("POL-001", "STR_ATTR", "hello")
-        whenever(valueRepository.findById(any())).thenReturn(Optional.of(pav))
-        whenever(valueRepository.save(any<PolicyAttributeValue>())).thenReturn(pav)
+        runBlocking {
+            coEvery { masterRepository.findById("STR_ATTR") } returns stringMaster
+            val pav = buildValue("POL-001", "STR_ATTR", "hello")
+            coEvery { valueRepository.findByPolicyNoAndAttributeCode("POL-001", "STR_ATTR") } returns pav
+            coEvery { valueRepository.save(any()) } returns pav
 
-        val result = service.updateAttributeValue("POL-001", "STR_ATTR", "hello")
-        assertThat(result.attributeValue).isEqualTo("hello")
+            val result = service.updateAttributeValue("POL-001", "STR_ATTR", "hello")
+            assertThat(result.attributeValue).isEqualTo("hello")
+        }
     }
 
     @Test @DisplayName("Attribute not found → throws ResourceNotFoundException")
     fun update_attributeNotFound() {
-        whenever(masterRepository.findById("MISSING")).thenReturn(Optional.empty())
-        assertThatThrownBy { service.updateAttributeValue("POL-001", "MISSING", "val") }
-            .isInstanceOf(ResourceNotFoundException::class.java)
-            .hasMessageContaining("MISSING")
+        runBlocking {
+            coEvery { masterRepository.findById("MISSING") } returns null
+            assertThatThrownBy { runBlocking { service.updateAttributeValue("POL-001", "MISSING", "val") } }
+                .isInstanceOf(ResourceNotFoundException::class.java)
+                .hasMessageContaining("MISSING")
+        }
     }
 
     @Test @DisplayName("ARCHIVED attribute → throws AttributeValidationException")
     fun update_archivedAttribute() {
-        val archived = buildMaster("ARC_ATTR", DataType.STRING, false, null, null)
-            .also { it.status = AttributeStatus.ARCHIVED }
-        whenever(masterRepository.findById("ARC_ATTR")).thenReturn(Optional.of(archived))
+        runBlocking {
+            val archived = buildMaster("ARC_ATTR", DataType.STRING, false, null, null)
+                .also { it.status = AttributeStatus.ARCHIVED }
+            coEvery { masterRepository.findById("ARC_ATTR") } returns archived
 
-        assertThatThrownBy { service.updateAttributeValue("POL-001", "ARC_ATTR", "val") }
-            .isInstanceOf(AttributeValidationException::class.java)
-            .hasMessageContaining("ARCHIVED")
+            assertThatThrownBy { runBlocking { service.updateAttributeValue("POL-001", "ARC_ATTR", "val") } }
+                .isInstanceOf(AttributeValidationException::class.java)
+                .hasMessageContaining("ARCHIVED")
+        }
     }
 
     // ── validateDataType ────────────────────────────────────
@@ -280,6 +298,49 @@ class PolicyAttributeServiceTest {
         assertThatNoException().isThrownBy {
             service.validateValueAgainstRegex(regexMaster, "MAX_1")
             service.validateValueAgainstRegex(regexMaster, "MAX_99")
+        }
+    }
+
+    @Test @DisplayName("New policy with empty attributes list → saves PolicyMaster and returns empty list")
+    fun createPolicy_emptyAttributesList() {
+        runBlocking {
+            val req = CreatePolicyRequestDto(policyNo = "POL-003", attributes = emptyList())
+            coEvery { policyMasterRepository.existsById("POL-003") } returns false
+            coEvery { policyMasterRepository.save(any()) } returns PolicyMaster(policyNo = "POL-003")
+
+            val result = service.createPolicyWithAttributes(req)
+            coVerify(exactly = 1) { policyMasterRepository.save(any()) }
+            assertThat(result).isEmpty()
+        }
+    }
+
+    @Test @DisplayName("Update attribute value (no existing value) → inserts new value entity")
+    fun update_noExistingValue_inserts() {
+        runBlocking {
+            coEvery { masterRepository.findById("STR_ATTR") } returns stringMaster
+            coEvery { valueRepository.findByPolicyNoAndAttributeCode("POL-001", "STR_ATTR") } returns null
+            
+            val slot = slot<PolicyAttributeValue>()
+            val savedVal = buildValue("POL-001", "STR_ATTR", "new_val")
+            coEvery { valueRepository.save(capture(slot)) } returns savedVal
+
+            val result = service.updateAttributeValue("POL-001", "STR_ATTR", "new_val")
+            assertThat(slot.captured.attributeValue).isEqualTo("new_val")
+            assertThat(result.attributeValue).isEqualTo("new_val")
+        }
+    }
+
+    @Test @DisplayName("Regex Cache: Compiling 501+ patterns correctly eviction limits size")
+    fun validateRegex_cacheEvictionLimit() {
+        // Feed 502 different regex patterns
+        for (i in 1..502) {
+            val master = buildMaster("REG_$i", DataType.STRING, false, "^PAT_${i}$", null)
+            service.validateValueAgainstRegex(master, "PAT_$i")
+        }
+        // Verification that it successfully processed all without OOM or exceptions
+        assertThatNoException().isThrownBy {
+            val checkMaster = buildMaster("REG_CHECK", DataType.STRING, false, "^TEST$", null)
+            service.validateValueAgainstRegex(checkMaster, "TEST")
         }
     }
 }

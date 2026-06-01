@@ -6,6 +6,7 @@ import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import kotlinx.coroutines.flow.Flow
 
 /**
  * REST controller for Attribute Group lookup.
@@ -22,28 +23,28 @@ class AttributeGroupController(
     @GetMapping
     fun listGroups(
         @RequestParam(name = "includeArchived", required = false, defaultValue = "false") includeArchived: Boolean
-    ): ResponseEntity<List<AttributeGroupDto>> =
-        ResponseEntity.ok(service.listGroups(includeArchived))
+    ): Flow<AttributeGroupDto> =
+        service.listGroups(includeArchived)
 
     /**
      * Get a single group by code.
      */
     @GetMapping("/{code}")
-    fun getByCode(@PathVariable code: String): ResponseEntity<AttributeGroupDto> =
+    suspend fun getByCode(@PathVariable code: String): ResponseEntity<AttributeGroupDto> =
         ResponseEntity.ok(service.getByCode(code))
 
     /**
      * Create a new attribute group.
      */
     @PostMapping
-    fun create(@Valid @RequestBody dto: AttributeGroupDto): ResponseEntity<AttributeGroupDto> =
+    suspend fun create(@Valid @RequestBody dto: AttributeGroupDto): ResponseEntity<AttributeGroupDto> =
         ResponseEntity.status(HttpStatus.CREATED).body(service.create(dto))
 
     /**
      * Update an existing attribute group.
      */
     @PutMapping("/{code}")
-    fun update(
+    suspend fun update(
         @PathVariable code: String,
         @Valid @RequestBody dto: AttributeGroupDto
     ): ResponseEntity<AttributeGroupDto> =
@@ -53,9 +54,8 @@ class AttributeGroupController(
      * Soft-delete: archive an attribute group (sets status to ARCHIVED).
      */
     @DeleteMapping("/{code}")
-    fun delete(@PathVariable code: String): ResponseEntity<Void> {
+    suspend fun delete(@PathVariable code: String): ResponseEntity<Void> {
         service.softDelete(code)
         return ResponseEntity.noContent().build()
     }
 }
-

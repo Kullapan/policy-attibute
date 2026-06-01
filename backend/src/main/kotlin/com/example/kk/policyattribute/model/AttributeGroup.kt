@@ -1,51 +1,68 @@
 package com.example.kk.policyattribute.model
 
-import jakarta.persistence.*
+import com.fasterxml.jackson.annotation.JsonIgnore
+import org.springframework.data.annotation.Id
+import org.springframework.data.annotation.Transient
+import org.springframework.data.annotation.Version
 import org.springframework.data.annotation.CreatedBy
 import org.springframework.data.annotation.CreatedDate
 import org.springframework.data.annotation.LastModifiedDate
-import org.springframework.data.jpa.domain.support.AuditingEntityListener
+import org.springframework.data.domain.Persistable
+import org.springframework.data.relational.core.mapping.Column
+import org.springframework.data.relational.core.mapping.Table
 import java.time.Instant
 
 /**
  * Entity representing an attribute category/group.
  * Used to dynamically group attributes and render tabs in the UI.
  */
-@Entity
-@Table(name = "attribute_group")
-@EntityListeners(AuditingEntityListener::class)
+@Table("attribute_group")
 class AttributeGroup(
 
     @Id
-    @Column(name = "code", length = 50, nullable = false)
+    @Column("code")
     var code: String = "",
 
-    @Column(name = "display_name_en", length = 100, nullable = false)
+    @Column("display_name_en")
     var displayNameEn: String = "",
 
-    @Column(name = "display_name_th", length = 100, nullable = false)
+    @Column("display_name_th")
     var displayNameTh: String = "",
 
-    @Column(name = "display_order", nullable = false)
+    @Column("display_order")
     var displayOrder: Int = 0,
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20, nullable = false)
+    @Column("status")
     var status: AttributeStatus = AttributeStatus.ACTIVE,
 
     @Version
-    @Column(name = "version", nullable = false)
+    @Column("version")
     var version: Long? = null,
 
     @CreatedDate
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column("created_at")
     var createdAt: Instant? = null,
 
     @LastModifiedDate
-    @Column(name = "updated_at", nullable = false)
+    @Column("updated_at")
     var updatedAt: Instant? = null,
 
     @CreatedBy
-    @Column(name = "created_by", length = 100, nullable = false, updatable = false)
+    @Column("created_by")
     var createdBy: String? = null
-)
+
+) : Persistable<String> {
+
+    @JsonIgnore
+    override fun getId(): String = code
+
+    @Transient
+    private var isNewEntity: Boolean = false
+
+    @JsonIgnore
+    override fun isNew(): Boolean = isNewEntity || version == null
+
+    fun setNew(isNew: Boolean) {
+        this.isNewEntity = isNew
+    }
+}

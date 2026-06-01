@@ -6,10 +6,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
-import org.springframework.orm.ObjectOptimisticLockingFailureException
+import org.springframework.dao.OptimisticLockingFailureException
 
 /**
- * Direct (non-MockMvc) unit tests for GlobalExceptionHandler.
+ * Direct unit tests for GlobalExceptionHandler.
  * Tests the handler methods in isolation, verifying status codes and response shape.
  */
 @DisplayName("GlobalExceptionHandler Unit Tests")
@@ -39,9 +39,9 @@ class GlobalExceptionHandlerTest {
         assertThat(response.body!!["message"] as String).contains("GHOST")
     }
 
-    @Test @DisplayName("ObjectOptimisticLockingFailureException → 409 Conflict with user-friendly message")
+    @Test @DisplayName("OptimisticLockingFailureException → 409 Conflict with user-friendly message")
     fun handleOptimisticLock_returns409() {
-        val ex = ObjectOptimisticLockingFailureException("AttributeMaster", "MAX_LIMIT")
+        val ex = object : OptimisticLockingFailureException("conflict") {}
         val response = handler.handleOptimisticLock(ex)
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.CONFLICT)

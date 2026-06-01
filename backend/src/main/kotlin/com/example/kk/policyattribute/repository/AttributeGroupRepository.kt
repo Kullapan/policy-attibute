@@ -2,19 +2,20 @@ package com.example.kk.policyattribute.repository
 
 import com.example.kk.policyattribute.model.AttributeGroup
 import com.example.kk.policyattribute.model.AttributeStatus
-import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
+import kotlinx.coroutines.flow.Flow
 import org.springframework.stereotype.Repository
 
 @Repository
-interface AttributeGroupRepository : JpaRepository<AttributeGroup, String> {
+interface AttributeGroupRepository : CoroutineCrudRepository<AttributeGroup, String> {
 
     /**
      * Find groups by status ordered by display_order ascending.
      */
-    fun findByStatusOrderByDisplayOrderAsc(status: AttributeStatus): List<AttributeGroup>
+    fun findByStatusOrderByDisplayOrderAsc(status: AttributeStatus): Flow<AttributeGroup>
 
     /**
      * Find all groups ordered by display_order ascending.
      */
-    fun findAllByOrderByDisplayOrderAsc(): List<AttributeGroup>
+    fun findAllByOrderByDisplayOrderAsc(): Flow<AttributeGroup>
 }

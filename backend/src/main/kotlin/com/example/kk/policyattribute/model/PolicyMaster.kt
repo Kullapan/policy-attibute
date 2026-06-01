@@ -1,36 +1,53 @@
 package com.example.kk.policyattribute.model
 
-import jakarta.persistence.*
+import com.fasterxml.jackson.annotation.JsonIgnore
+import org.springframework.data.annotation.Id
+import org.springframework.data.annotation.Transient
 import org.springframework.data.annotation.CreatedBy
 import org.springframework.data.annotation.CreatedDate
 import org.springframework.data.annotation.LastModifiedDate
-import org.springframework.data.jpa.domain.support.AuditingEntityListener
+import org.springframework.data.domain.Persistable
+import org.springframework.data.relational.core.mapping.Column
+import org.springframework.data.relational.core.mapping.Table
 import java.time.Instant
 
 /**
  * Master entity for Policies.
  */
-@Entity
-@Table(name = "policy_master")
-@EntityListeners(AuditingEntityListener::class)
+@Table("policy_master")
 class PolicyMaster(
 
     @Id
-    @Column(name = "policy_no", length = 50)
+    @Column("policy_no")
     var policyNo: String = "",
 
-    @Column(name = "status", length = 20, nullable = false)
+    @Column("status")
     var status: String = "ACTIVE",
 
     @CreatedDate
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column("created_at")
     var createdAt: Instant? = null,
 
     @LastModifiedDate
-    @Column(name = "updated_at", nullable = false)
+    @Column("updated_at")
     var updatedAt: Instant? = null,
 
     @CreatedBy
-    @Column(name = "created_by", length = 100, nullable = false, updatable = false)
+    @Column("created_by")
     var createdBy: String? = null
-)
+
+) : Persistable<String> {
+
+    @JsonIgnore
+    override fun getId(): String = policyNo
+
+    @Transient
+    private var isNewEntity: Boolean = false
+
+    @JsonIgnore
+    override fun isNew(): Boolean = isNewEntity || createdAt == null
+
+    fun setNew(isNew: Boolean) {
+        this.isNewEntity = isNew
+    }
+}

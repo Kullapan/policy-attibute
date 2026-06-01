@@ -7,6 +7,7 @@ import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import kotlinx.coroutines.flow.Flow
 
 /**
  * REST controller for the Attribute Dictionary (Master table CRUD).
@@ -24,28 +25,28 @@ class AttributeMasterController(
     fun list(
         @RequestParam(required = false) search: String?,
         @RequestParam(required = false) status: AttributeStatus?
-    ): ResponseEntity<List<AttributeMasterDto>> =
-        ResponseEntity.ok(service.listAttributes(search, status))
+    ): Flow<AttributeMasterDto> =
+        service.listAttributes(search, status)
 
     /**
      * Get a single attribute by its code.
      */
     @GetMapping("/{code}")
-    fun getByCode(@PathVariable code: String): ResponseEntity<AttributeMasterDto> =
+    suspend fun getByCode(@PathVariable code: String): ResponseEntity<AttributeMasterDto> =
         ResponseEntity.ok(service.getByCode(code))
 
     /**
      * Create a new attribute definition.
      */
     @PostMapping
-    fun create(@Valid @RequestBody dto: AttributeMasterDto): ResponseEntity<AttributeMasterDto> =
+    suspend fun create(@Valid @RequestBody dto: AttributeMasterDto): ResponseEntity<AttributeMasterDto> =
         ResponseEntity.status(HttpStatus.CREATED).body(service.create(dto))
 
     /**
      * Update an existing attribute definition.
      */
     @PutMapping("/{code}")
-    fun update(
+    suspend fun update(
         @PathVariable code: String,
         @Valid @RequestBody dto: AttributeMasterDto
     ): ResponseEntity<AttributeMasterDto> =
@@ -55,7 +56,7 @@ class AttributeMasterController(
      * Soft-delete: archive an attribute (sets status to ARCHIVED).
      */
     @DeleteMapping("/{code}")
-    fun delete(@PathVariable code: String): ResponseEntity<Void> {
+    suspend fun delete(@PathVariable code: String): ResponseEntity<Void> {
         service.softDelete(code)
         return ResponseEntity.noContent().build()
     }

@@ -1,7 +1,7 @@
 # Policy Attribute Management System (PAMS)
 
 > A full-stack enterprise application for managing and mapping dynamic policy attributes.  
-> **Backend:** Spring Boot 3.4.4 (Kotlin 1.9.25, Gradle) | **Frontend:** React 19 (TypeScript, Vite, Tailwind CSS) | **Database:** PostgreSQL 16
+> **Backend:** Spring Boot 3.4.4 (Kotlin 1.9.25, WebFlux, R2DBC, Coroutines, Gradle) | **Frontend:** React 19 (TypeScript, Vite, Tailwind CSS) | **Database:** PostgreSQL 16
 
 ---
 
@@ -34,24 +34,25 @@ The **Policy Attribute Management System (PAMS)** is a high-density, enterprise-
 
 ## 2. Tech Stack
 
-| Layer         | Technology                                                      |
-|---------------|-----------------------------------------------------------------|
-| **Backend**   | Kotlin 1.9.25, Spring Boot 3.4.4, Gradle 8.x                   |
-| **Plugins**   | `kotlin-jvm`, `kotlin-spring`, `kotlin-jpa`                     |
-| **ORM**       | Spring Data JPA / Hibernate + Flyway Migrations                 |
-| **Database**  | PostgreSQL 16 (Alpine)                                          |
-| **Frontend**  | React 19, TypeScript 6, Vite 6, Tailwind CSS 4                  |
-| **Routing**   | React Router DOM 7                                              |
-| **API Docs**  | SpringDoc OpenAPI / Swagger UI (`/swagger-ui.html`)             |
-| **DB Admin**  | pgAdmin 4 (port `5050`)                                         |
-| **Container** | Docker Compose (Postgres + pgAdmin)                             |
-| **Target**    | OpenShift                                                       |
+| Layer          | Technology                                                      |
+|----------------|-----------------------------------------------------------------|
+| **Backend**    | Kotlin 1.9.25, Spring Boot 3.4.4, Gradle 8.x                   |
+| **Reactive**   | Spring WebFlux, Kotlin Coroutines & Flow                        |
+| **Plugins**    | `kotlin-jvm`, `kotlin-spring`                                   |
+| **Persistence**| Spring Data R2DBC (Reactive Postgres) + Flyway Migrations       |
+| **Database**   | PostgreSQL 16 (Alpine)                                          |
+| **Frontend**   | React 19, TypeScript 6, Vite 6, Tailwind CSS 4                  |
+| **Routing**    | React Router DOM 7                                              |
+| **API Docs**   | SpringDoc OpenAPI / Swagger UI WebFlux (`/swagger-ui.html`)      |
+| **DB Admin**   | pgAdmin 4 (port `5050`)                                         |
+| **Container**  | Docker Compose (Postgres + pgAdmin)                             |
+| **Target**     | OpenShift                                                       |
 
 ---
 
 ## 3. Architecture
 
-The backend follows a **standard 3-tier Spring MVC architecture** with clear layer separation, written in idiomatic Kotlin:
+The backend follows a **reactive, non-blocking 3-tier architecture** using Spring WebFlux and Kotlin Coroutines/Flow:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -60,42 +61,41 @@ The backend follows a **standard 3-tier Spring MVC architecture** with clear lay
 │   AttributeGroupController   BulkUploadController            │
 │   GlobalExceptionHandler                                     │
 └───────────────────────┬─────────────────────────────────────┘
-                        │ calls
+                        │ calls (suspend / Flow)
 ┌───────────────────────▼─────────────────────────────────────┐
 │                   service (Business Logic)                    │
 │   AttributeMasterService   PolicyAttributeService            │
 │   AttributeGroupService    BulkUploadService                 │
 └───────────────────────┬─────────────────────────────────────┘
-                        │ uses
+                        │ uses (CoroutineCrudRepository)
 ┌───────────────────────▼─────────────────────────────────────┐
 │                  repository (Data Access)                     │
 │   AttributeMasterRepository  PolicyMasterRepository          │
 │   AttributeGroupRepository   PolicyAttributeValueRepository  │
 └───────────────────────┬─────────────────────────────────────┘
-                        │ persisted via
+                        │ persisted via (R2DBC)
 ┌───────────────────────▼─────────────────────────────────────┐
 │                    model (Domain Entities)                    │
 │   AttributeMaster    PolicyMaster    PolicyAttributeValue    │
 │   AttributeGroup     AttributeStatus DataType                │
-│   PolicyAttributeValueId                                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 **Supporting packages:**
 - `dto` — Kotlin `data class` request/response objects with JSR-380 (`@Valid`) annotations
 - `exception` — Custom `RuntimeException` subclasses (`AttributeValidationException`, `ResourceNotFoundException`)
-- `config` — `@Configuration` classes (`WebConfig` for CORS, `JpaAuditingConfig`)
+- `config` — `@Configuration` classes (`WebConfig` for CORS, `R2dbcAuditingConfig` for reactive auditing)
 
 **Key Architectural Decisions:**
 
 | Decision | Rationale |
 |----------|-----------|
 | Soft Delete (`status = ARCHIVED`) | Preserves historical attribute data; never physically removes rows |
-| Optimistic Locking (`@Version`) | Prevents lost-update conflicts during concurrent edits |
+| Optimistic Locking (`@Version`) | Prevents lost-update conflicts during concurrent edits; supported natively by Spring Data R2DBC |
 | `attribute_code` as PK | Human-readable lookup key (e.g., `MAX_LIMIT`); preferred over UUID in APIs |
-| Composite PK for mapping table | `(policy_no, attribute_code)` ensures one value per attribute per policy |
-| Streaming CSV parsing | Line-by-line OpenCSV reader minimizes heap pressure on constrained pods |
-| Memoized Regex Cache | `ConcurrentHashMap<String, Pattern>` avoids re-compiling patterns on every request |
+| Surrogate PK for mapping table | `id` (BIGSERIAL) as primary key with unique index `uq_policy_attribute_values` on `(policy_no, attribute_code)` to ensure single mapping per policy-attribute pair |
+| Streaming CSV parsing | Temp file & `CSVReader` stream minimize memory usage under constrained OpenShift pods. Supported by non-blocking Spring WebFlux `FilePart`. |
+| Memoized Regex Cache | Thread-safe `LinkedHashMap`-based LRU cache (max 500) to optimize CPU cycles and prevent pattern re-compilation |
 
 ---
 
@@ -140,8 +140,9 @@ erDiagram
     }
 
     POLICY_ATTRIBUTE_VALUES {
-        VARCHAR(50)     policy_no       PK,FK
-        VARCHAR(100)    attribute_code  PK,FK
+        BIGINT          id              PK  "Surrogate primary key"
+        VARCHAR(50)     policy_no       FK  "Unique with attribute_code"
+        VARCHAR(100)    attribute_code  FK  "Unique with policy_no"
         TEXT            attribute_value
         TIMESTAMPTZ     created_at
         TIMESTAMPTZ     updated_at
@@ -160,7 +161,7 @@ erDiagram
 | `AttributeGroup` | `attribute_group` | Defines group categories for policy attributes. Used to dynamically group attributes and render tabs/dropdown filters. |
 | `AttributeMaster` | `attribute_master` | Central dictionary of attribute definitions. Each row defines one reusable attribute type with validation rules, optionally linked to an `attribute_group`. |
 | `PolicyMaster` | `policy_master` | Represents an insurance policy. Serves as the left-hand side of attribute mappings. |
-| `PolicyAttributeValue` | `policy_attribute_values` | Junction / fact table. Stores the actual **value** of an attribute **for a specific policy**. PK is `(policy_no, attribute_code)`. |
+| `PolicyAttributeValue` | `policy_attribute_values` | Junction / fact table. Stores the actual **value** of an attribute **for a specific policy**. PK is surrogate `id`, and a unique constraint handles `(policy_no, attribute_code)`. |
 
 ---
 
@@ -209,15 +210,15 @@ graph TB
         end
 
         subgraph Models["model"]
-            AmEntity["AttributeMaster @Entity"]
-            PmEntity["PolicyMaster @Entity"]
-            PavEntity["PolicyAttributeValue @Entity"]
+            AmEntity["AttributeMaster @Table"]
+            PmEntity["PolicyMaster @Table"]
+            PavEntity["PolicyAttributeValue @Table"]
             Enums["DataType enum<br/>AttributeStatus enum"]
         end
 
         subgraph Cfg["config"]
             WebCfg["WebConfig (CORS)"]
-            AuditCfg["JpaAuditingConfig"]
+            AuditCfg["R2dbcAuditingConfig"]
         end
 
         AttrCtrl --> AttrSvc
@@ -239,7 +240,7 @@ graph TB
 
     subgraph DB["🗄️ PostgreSQL 16 (Port 5432)"]
         Tables["attribute_master<br/>policy_master<br/>policy_attribute_values"]
-        Flyway["Flyway Migrations<br/>V1__create_schema.sql<br/>V2__insert_test_data.sql<br/>V3__create_policy_master.sql<br/>V4__add_consent_attributes.sql"]
+        Flyway["Flyway Migrations<br/>V1__create_schema.sql<br/>V2__insert_test_data.sql"]
     end
 
     subgraph Tools["🔧 DevTools"]
@@ -248,7 +249,7 @@ graph TB
     end
 
     ApiClient -- "HTTP REST (JSON)" --> REST
-    Infra -- "JPA / JDBC" --> Tables
+    Backend -- "R2DBC Driver" --> Tables
     PgAdmin -- "SQL" --> DB
     Swagger -.-> REST
 ```
@@ -258,12 +259,12 @@ graph TB
 ```
 Browser (React)
   └─> PUT /api/v1/policies/{policyNo}/attributes/{attrCode}
-         └─> PolicyAttributeController.updateValue()
-               └─> PolicyAttributeService.updateAttributeValue()
+         └─> PolicyAttributeController.updateValue() [suspend]
+               └─> PolicyAttributeService.updateAttributeValue() [suspend]
                      ├─> AttributeMasterRepository.findById(attrCode)  → load definition
                      ├─> validateDataType(master, value)               → STRING/NUMBER/DATE/BOOLEAN
                      ├─> validateValueAgainstRegex(master, value)      → memoized Pattern
-                     └─> PolicyAttributeValueRepository.save(entity)   → upsert to DB
+                     └─> PolicyAttributeValueRepository.save(entity)   → upsert via R2DBC
 ```
 
 ### Data Flow: Bulk CSV Upload
@@ -271,15 +272,17 @@ Browser (React)
 ```
 Browser (React)
   └─> POST /api/v1/bulk-upload  (multipart/form-data)
-         └─> BulkUploadController.upload()
-               └─> BulkUploadService.processCsv()
-                     ├─> CSVReader (streaming, line-by-line)
+         └─> BulkUploadController.upload(FilePart) [suspend]
+               └─> BulkUploadService.processCsv(FilePart) [suspend]
+                     ├─> Save FilePart to temp file reactively
+                     ├─> CSVReader (streaming line-by-line on Dispatchers.IO)
                      ├─> For each row:
                      │     ├─> AttributeMasterRepository.findById(attributeCode)
                      │     ├─> PolicyAttributeService.validateDataType()
                      │     ├─> PolicyAttributeService.validateValueAgainstRegex()
                      │     └─> Accumulate valid entities OR RowError
-                     ├─> PolicyAttributeValueRepository.saveAll(validEntities)
+                     ├─> PolicyAttributeValueRepository.saveAll(validEntities) [returns Flow]
+                     │     └─> collect() Flow to execute inserts in batch
                      └─> Return BulkUploadResultDto { totalRows, successCount, errorCount, errors[] }
 ```
 
@@ -509,7 +512,7 @@ POL-002,IS_ACTIVE,true
 
 ### 8.1 Validation Pipeline (`PolicyAttributeService`)
 
-Every attribute value passes through a **two-stage validation** before persistence, implemented using idiomatic Kotlin:
+Every attribute value passes through a **two-stage validation** before persistence, implemented using idiomatic Kotlin within a reactive suspending function context:
 
 ```
 Stage 1 — Data Type Strategy (Kotlin when expression on DataType enum)
@@ -535,20 +538,27 @@ Attributes are **never physically deleted**. Instead, `status` is set to `ARCHIV
 
 ### 8.3 Optimistic Locking
 
-`AttributeMaster` carries a `@Version Long version` field. The database handles the increment; when a client sends a stale `version`, Hibernate throws `ObjectOptimisticLockingFailureException`, which `GlobalExceptionHandler` catches and returns as `HTTP 409 Conflict`.
+`AttributeMaster` and `AttributeGroup` entities carry a `@Version var version: Long? = null` field. The database handles the increment; when a client sends a stale `version`, Spring Data R2DBC throws an `OptimisticLockingFailureException`, which `GlobalExceptionHandler` catches and returns as `HTTP 409 Conflict`.
 
 ### 8.4 Streaming CSV Upload (`BulkUploadService`)
 
 ```kotlin
-CSVReader(InputStreamReader(file.inputStream, StandardCharsets.UTF_8)).use { reader ->
-    reader.readNext() ?: throw AttributeValidationException("CSV file is empty")
-    var row: Array<String>?
-    while (reader.readNext().also { row = it } != null) {
-        // validate data-type + regex per row
-        // accumulate valid entities or RowErrors
+// Save FilePart content to temp file reactively first:
+file.transferTo(tempFile).awaitSingleOrNull()
+
+// Stream read cells line-by-line within an IO dispatcher:
+withContext(Dispatchers.IO) {
+    CSVReader(InputStreamReader(Files.newInputStream(tempFile), StandardCharsets.UTF_8)).use { reader ->
+        reader.readNext() ?: throw AttributeValidationException("CSV file is empty")
+        var row: Array<String>?
+        while (reader.readNext().also { row = it } != null) {
+            // validate data-type + regex per row
+            // accumulate valid entities or RowErrors
+        }
     }
 }
-valueRepository.saveAll(validEntities)  // single batch write at the end
+// Save entities into R2DBC which returns Flow, collect Flow to execute inserts:
+valueRepository.saveAll(validEntities).collect()
 ```
 
 Memory usage is bounded to one row at a time + the accumulated valid-entity list — safe for OpenShift pods with restricted heap.
@@ -566,9 +576,9 @@ Memory usage is bounded to one row at a time + the accumulated valid-entity list
 | `Toast` | Auto-dismissing success/error notification |
 | `StatusChip` | Pill badge rendering `ACTIVE` (blue) / `ARCHIVED` (orange) |
 
-### 8.6 JPA Auditing
+### 8.6 R2DBC Auditing
 
-`JpaAuditingConfig` enables `@EnableJpaAuditing` with a static `AuditorAware` returning `"system"`. All three entity tables auto-populate `created_at`, `updated_at`, and `created_by` via Spring Data annotations.
+`R2dbcAuditingConfig` enables `@EnableR2dbcAuditing` with a static `ReactiveAuditorAware<String>` returning a `Mono.just("system")`. All entity tables auto-populate `created_at`, `updated_at`, and `created_by` via Spring Data Relational annotations.
 
 ### 8.7 Policy Consent Dashboard (`PolicyListPage`)
 
@@ -629,14 +639,10 @@ Managed by **Flyway** (`classpath:db/migration`):
 
 | Version | File | Description |
 |---------|------|-------------|
-| V1 | `V1__create_schema.sql` | Creates `attribute_master` and `policy_attribute_values` tables |
-| V2 | `V2__insert_test_data.sql` | Seeds initial attribute definitions for testing |
-| V3 | `V3__create_policy_master.sql` | Creates `policy_master` table |
-| V4 | `V4__add_consent_attributes.sql` | Adds `PDPA_CONSENT`, `RPQ_COMPLETED`, `MARKETING_CONSENT` attributes and consent seed data |
-| V5 | `V5__revise_test_data_display_names.sql` | Revises test data display names in database |
-| V6 | `V6__create_attribute_group.sql` | Introduces `attribute_group` table and links it to `attribute_master` via foreign key `group_code` |
+| V1 | `V1__create_schema.sql` | Creates the consolidated tables (`attribute_group`, `attribute_master`, `policy_master`, `policy_attribute_values`) with surrogate key constraints |
+| V2 | `V2__insert_test_data.sql` | Seeds initial test data including attribute groups, master attributes, policies, and attribute value mappings |
 
-> Flyway runs automatically on `bootRun`. Configuration: `spring.flyway.baseline-on-migrate=true`.
+> Flyway runs automatically on application startup. Configuration details are loaded from `application.properties`.
 
 ---
 

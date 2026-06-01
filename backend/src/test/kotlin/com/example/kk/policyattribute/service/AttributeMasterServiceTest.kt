@@ -8,32 +8,26 @@ import com.example.kk.policyattribute.model.AttributeMaster
 import com.example.kk.policyattribute.model.AttributeStatus
 import com.example.kk.policyattribute.model.DataType
 import com.example.kk.policyattribute.repository.AttributeMasterRepository
+import com.example.kk.policyattribute.repository.AttributeGroupRepository
+import io.mockk.*
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.ArgumentCaptor
-import org.mockito.InjectMocks
-import org.mockito.Mock
-import org.mockito.junit.jupiter.MockitoExtension
-import org.mockito.kotlin.any
-import org.mockito.kotlin.never
-import org.mockito.kotlin.verify
-import org.mockito.kotlin.whenever
 import java.time.Instant
-import java.util.Optional
 
-@ExtendWith(MockitoExtension::class)
 @DisplayName("AttributeMasterService Unit Tests")
 class AttributeMasterServiceTest {
 
-    @Mock lateinit var repository: AttributeMasterRepository
-    @Mock lateinit var groupRepository: com.example.kk.policyattribute.repository.AttributeGroupRepository
-    @InjectMocks lateinit var service: AttributeMasterService
+    private val repository = mockk<AttributeMasterRepository>()
+    private val groupRepository = mockk<AttributeGroupRepository>()
+    private val service = AttributeMasterService(repository, groupRepository)
 
-    lateinit var active: AttributeMaster
-    lateinit var validDto: AttributeMasterDto
+    private lateinit var active: AttributeMaster
+    private lateinit var validDto: AttributeMasterDto
 
     @BeforeEach
     fun setUp() {
@@ -56,194 +50,264 @@ class AttributeMasterServiceTest {
 
     @Test @DisplayName("No filters → returns all attributes")
     fun listAll_noFilters() {
-        whenever(repository.findAll()).thenReturn(listOf(active))
-        val result = service.listAttributes(null, null)
-        assertThat(result).hasSize(1)
-        assertThat(result.first().code).isEqualTo("MAX_LIMIT")
+        runBlocking {
+            every { repository.findAll() } returns listOf(active).asFlow()
+            val result = service.listAttributes(null, null).toList()
+            assertThat(result).hasSize(1)
+            assertThat(result.first().code).isEqualTo("MAX_LIMIT")
+        }
     }
 
     @Test @DisplayName("Blank search → treated as no search filter")
     fun listAll_blankSearch() {
-        whenever(repository.findAll()).thenReturn(listOf(active))
-        service.listAttributes("   ", null)
-        verify(repository).findAll()
-        verify(repository, never()).searchByNameOrCode(any())
+        runBlocking {
+            every { repository.findAll() } returns listOf(active).asFlow()
+            service.listAttributes("   ", null).toList()
+            verify(exactly = 1) { repository.findAll() }
+            verify(exactly = 0) { repository.searchByNameOrCode(any()) }
+        }
     }
 
     @Test @DisplayName("Status filter only → uses findByStatus")
     fun list_statusFilter() {
-        whenever(repository.findByStatus(AttributeStatus.ACTIVE)).thenReturn(listOf(active))
-        service.listAttributes(null, AttributeStatus.ACTIVE)
-        verify(repository).findByStatus(AttributeStatus.ACTIVE)
+        runBlocking {
+            every { repository.findByStatus(AttributeStatus.ACTIVE) } returns listOf(active).asFlow()
+            service.listAttributes(null, AttributeStatus.ACTIVE).toList()
+            verify(exactly = 1) { repository.findByStatus(AttributeStatus.ACTIVE) }
+        }
     }
 
     @Test @DisplayName("Search only → uses searchByNameOrCode with trimmed input")
     fun list_searchOnly() {
-        whenever(repository.searchByNameOrCode("limit")).thenReturn(listOf(active))
-        service.listAttributes("  limit  ", null)
-        verify(repository).searchByNameOrCode("limit")
+        runBlocking {
+            every { repository.searchByNameOrCode("limit") } returns listOf(active).asFlow()
+            service.listAttributes("  limit  ", null).toList()
+            verify(exactly = 1) { repository.searchByNameOrCode("limit") }
+        }
     }
 
     @Test @DisplayName("Search + status → uses searchAttributes")
     fun list_searchAndStatus() {
-        whenever(repository.searchAttributes("limit", AttributeStatus.ACTIVE)).thenReturn(listOf(active))
-        service.listAttributes("limit", AttributeStatus.ACTIVE)
-        verify(repository).searchAttributes("limit", AttributeStatus.ACTIVE)
+        runBlocking {
+            every { repository.searchAttributes("limit", "ACTIVE") } returns listOf(active).asFlow()
+            service.listAttributes("limit", AttributeStatus.ACTIVE).toList()
+            verify(exactly = 1) { repository.searchAttributes("limit", "ACTIVE") }
+        }
     }
 
     // ── getByCode ───────────────────────────────────────────
 
     @Test @DisplayName("Existing code → returns DTO with all fields mapped")
     fun getByCode_found() {
-        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
-        val dto = service.getByCode("MAX_LIMIT")
-        assertThat(dto.code).isEqualTo("MAX_LIMIT")
-        assertThat(dto.dataType).isEqualTo(DataType.NUMBER)
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            val dto = service.getByCode("MAX_LIMIT")
+            assertThat(dto.code).isEqualTo("MAX_LIMIT")
+            assertThat(dto.dataType).isEqualTo(DataType.NUMBER)
+        }
     }
 
     @Test @DisplayName("Unknown code → throws ResourceNotFoundException")
     fun getByCode_notFound() {
-        whenever(repository.findById("UNKNOWN")).thenReturn(Optional.empty())
-        assertThatThrownBy { service.getByCode("UNKNOWN") }
-            .isInstanceOf(ResourceNotFoundException::class.java)
-            .hasMessageContaining("UNKNOWN")
+        runBlocking {
+            coEvery { repository.findById("UNKNOWN") } returns null
+            assertThatThrownBy { runBlocking { service.getByCode("UNKNOWN") } }
+                .isInstanceOf(ResourceNotFoundException::class.java)
+                .hasMessageContaining("UNKNOWN")
+        }
     }
 
     // ── create ──────────────────────────────────────────────
 
     @Test @DisplayName("New code with valid regex → saves with ACTIVE status")
     fun create_success() {
-        whenever(repository.existsById("MAX_LIMIT")).thenReturn(false)
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(active)
-        service.create(validDto)
-        val cap = ArgumentCaptor.forClass(AttributeMaster::class.java)
-        verify(repository).save(cap.capture())
-        assertThat(cap.value.status).isEqualTo(AttributeStatus.ACTIVE)
+        runBlocking {
+            coEvery { repository.existsById("MAX_LIMIT") } returns false
+            coEvery { groupRepository.existsById(any()) } returns true
+            val slot = slot<AttributeMaster>()
+            coEvery { repository.save(capture(slot)) } returns active
+
+            service.create(validDto)
+
+            assertThat(slot.captured.status).isEqualTo(AttributeStatus.ACTIVE)
+        }
     }
 
     @Test @DisplayName("New code with groupCode → saves with associated AttributeGroup")
     fun create_withGroupCode_success() {
-        val dto = validDto.copy(groupCode = "CONSENT")
-        val group = AttributeGroup(code = "CONSENT", displayNameEn = "Consent", displayNameTh = "ความยินยอม")
-        whenever(repository.existsById("MAX_LIMIT")).thenReturn(false)
-        whenever(groupRepository.findById("CONSENT")).thenReturn(Optional.of(group))
-        
-        val activeWithGroup = active.apply { attributeGroup = group }
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(activeWithGroup)
-        
-        val result = service.create(dto)
-        
-        val cap = ArgumentCaptor.forClass(AttributeMaster::class.java)
-        verify(repository).save(cap.capture())
-        assertThat(cap.value.attributeGroup).isEqualTo(group)
-        assertThat(result.groupCode).isEqualTo("CONSENT")
+        runBlocking {
+            val dto = validDto.copy(groupCode = "CONSENT")
+            coEvery { repository.existsById("MAX_LIMIT") } returns false
+            coEvery { groupRepository.existsById("CONSENT") } returns true
+
+            val activeWithGroup = active.apply { groupCode = "CONSENT" }
+            val slot = slot<AttributeMaster>()
+            coEvery { repository.save(capture(slot)) } returns activeWithGroup
+
+            val result = service.create(dto)
+
+            assertThat(slot.captured.groupCode).isEqualTo("CONSENT")
+            assertThat(result.groupCode).isEqualTo("CONSENT")
+        }
     }
 
     @Test @DisplayName("Duplicate code → throws AttributeValidationException, never saves")
     fun create_duplicateCode() {
-        whenever(repository.existsById("MAX_LIMIT")).thenReturn(true)
-        assertThatThrownBy { service.create(validDto) }
-            .isInstanceOf(AttributeValidationException::class.java)
-            .hasMessageContaining("already exists")
-        verify(repository, never()).save(any())
+        runBlocking {
+            coEvery { repository.existsById("MAX_LIMIT") } returns true
+            assertThatThrownBy { runBlocking { service.create(validDto) } }
+                .isInstanceOf(AttributeValidationException::class.java)
+                .hasMessageContaining("already exists")
+            coVerify(exactly = 0) { repository.save(any()) }
+        }
+    }
+
+    @Test @DisplayName("New code with non-existent groupCode → throws ResourceNotFoundException")
+    fun create_nonExistentGroupCode() {
+        runBlocking {
+            val dto = validDto.copy(groupCode = "UNKNOWN_GROUP")
+            coEvery { repository.existsById("MAX_LIMIT") } returns false
+            coEvery { groupRepository.existsById("UNKNOWN_GROUP") } returns false
+
+            assertThatThrownBy { runBlocking { service.create(dto) } }
+                .isInstanceOf(ResourceNotFoundException::class.java)
+                .hasMessageContaining("UNKNOWN_GROUP")
+            coVerify(exactly = 0) { repository.save(any()) }
+        }
     }
 
     @Test @DisplayName("Invalid regex syntax → throws AttributeValidationException before save")
     fun create_invalidRegex() {
-        val bad = AttributeMasterDto(code = "MAX_LIMIT", displayName = "X", dataType = DataType.STRING, regexPattern = "[A-Z")
-        whenever(repository.existsById("MAX_LIMIT")).thenReturn(false)
-        assertThatThrownBy { service.create(bad) }
-            .isInstanceOf(AttributeValidationException::class.java)
-            .hasMessageContaining("Invalid regex pattern")
-        verify(repository, never()).save(any())
+        runBlocking {
+            val bad = AttributeMasterDto(code = "MAX_LIMIT", displayName = "X", dataType = DataType.STRING, regexPattern = "[A-Z")
+            coEvery { repository.existsById("MAX_LIMIT") } returns false
+            assertThatThrownBy { runBlocking { service.create(bad) } }
+                .isInstanceOf(AttributeValidationException::class.java)
+                .hasMessageContaining("Invalid regex pattern")
+            coVerify(exactly = 0) { repository.save(any()) }
+        }
     }
 
     @Test @DisplayName("Null regex → skips validation and saves")
     fun create_nullRegex() {
-        val dto = AttributeMasterDto(code = "NO_REGEX", displayName = "X", dataType = DataType.STRING)
-        val saved = AttributeMaster(code = "NO_REGEX", displayName = "X", dataType = DataType.STRING, status = AttributeStatus.ACTIVE)
-        whenever(repository.existsById("NO_REGEX")).thenReturn(false)
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(saved)
-        assertThatNoException().isThrownBy { service.create(dto) }
+        runBlocking {
+            val dto = AttributeMasterDto(code = "NO_REGEX", displayName = "X", dataType = DataType.STRING)
+            val saved = AttributeMaster(code = "NO_REGEX", displayName = "X", dataType = DataType.STRING, status = AttributeStatus.ACTIVE)
+            coEvery { repository.existsById("NO_REGEX") } returns false
+            coEvery { repository.save(any()) } returns saved
+            assertThatNoException().isThrownBy { runBlocking { service.create(dto) } }
+        }
     }
 
     @Test @DisplayName("Blank regex string → skips validation and saves")
     fun create_blankRegex() {
-        val dto = AttributeMasterDto(code = "BLANK", displayName = "X", dataType = DataType.STRING, regexPattern = "   ")
-        val saved = AttributeMaster(code = "BLANK", displayName = "X", dataType = DataType.STRING, status = AttributeStatus.ACTIVE)
-        whenever(repository.existsById("BLANK")).thenReturn(false)
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(saved)
-        assertThatNoException().isThrownBy { service.create(dto) }
+        runBlocking {
+            val dto = AttributeMasterDto(code = "BLANK", displayName = "X", dataType = DataType.STRING, regexPattern = "   ")
+            val saved = AttributeMaster(code = "BLANK", displayName = "X", dataType = DataType.STRING, status = AttributeStatus.ACTIVE)
+            coEvery { repository.existsById("BLANK") } returns false
+            coEvery { repository.save(any()) } returns saved
+            assertThatNoException().isThrownBy { runBlocking { service.create(dto) } }
+        }
     }
 
     // ── update ──────────────────────────────────────────────
 
     @Test @DisplayName("Existing code + valid data → updates display name, version")
     fun update_success() {
-        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(active)
-        val dto = AttributeMasterDto(displayName = "Updated Name", dataType = DataType.NUMBER, regexPattern = "^\\d+$", version = 2L)
-        service.update("MAX_LIMIT", dto)
-        assertThat(active.displayName).isEqualTo("Updated Name")
-        assertThat(active.version).isEqualTo(2L)
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            val slot = slot<AttributeMaster>()
+            coEvery { repository.save(capture(slot)) } returns active
+            val dto = AttributeMasterDto(displayName = "Updated Name", dataType = DataType.NUMBER, regexPattern = "^\\d+$", version = 2L)
+            service.update("MAX_LIMIT", dto)
+            assertThat(slot.captured.displayName).isEqualTo("Updated Name")
+            assertThat(slot.captured.version).isEqualTo(2L)
+        }
     }
 
     @Test @DisplayName("Update groupCode → updates attributeGroup association")
     fun update_groupCode_success() {
-        val group = AttributeGroup(code = "CONSENT", displayNameEn = "Consent", displayNameTh = "ความยินยอม")
-        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
-        whenever(groupRepository.findById("CONSENT")).thenReturn(Optional.of(group))
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(active)
-        
-        val dto = AttributeMasterDto(displayName = "Updated Name", groupCode = "CONSENT")
-        service.update("MAX_LIMIT", dto)
-        
-        assertThat(active.attributeGroup).isEqualTo(group)
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            coEvery { groupRepository.existsById("CONSENT") } returns true
+            val slot = slot<AttributeMaster>()
+            coEvery { repository.save(capture(slot)) } returns active
+
+            val dto = AttributeMasterDto(displayName = "Updated Name", groupCode = "CONSENT")
+            service.update("MAX_LIMIT", dto)
+
+            assertThat(slot.captured.groupCode).isEqualTo("CONSENT")
+        }
+    }
+
+    @Test @DisplayName("Update to non-existent groupCode → throws ResourceNotFoundException")
+    fun update_nonExistentGroupCode() {
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            coEvery { groupRepository.existsById("UNKNOWN_GROUP") } returns false
+
+            val dto = AttributeMasterDto(displayName = "Updated Name", groupCode = "UNKNOWN_GROUP")
+            assertThatThrownBy { runBlocking { service.update("MAX_LIMIT", dto) } }
+                .isInstanceOf(ResourceNotFoundException::class.java)
+                .hasMessageContaining("UNKNOWN_GROUP")
+            coVerify(exactly = 0) { repository.save(any()) }
+        }
     }
 
     @Test @DisplayName("Non-existent code on update → throws ResourceNotFoundException")
     fun update_notFound() {
-        whenever(repository.findById("MISSING")).thenReturn(Optional.empty())
-        assertThatThrownBy { service.update("MISSING", validDto) }
-            .isInstanceOf(ResourceNotFoundException::class.java)
-            .hasMessageContaining("MISSING")
+        runBlocking {
+            coEvery { repository.findById("MISSING") } returns null
+            assertThatThrownBy { runBlocking { service.update("MISSING", validDto) } }
+                .isInstanceOf(ResourceNotFoundException::class.java)
+                .hasMessageContaining("MISSING")
+        }
     }
 
     @Test @DisplayName("Invalid regex on update → throws AttributeValidationException, never saves")
     fun update_invalidRegex() {
-        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
-        val bad = AttributeMasterDto(displayName = "X", dataType = DataType.STRING, regexPattern = "(unclosed")
-        assertThatThrownBy { service.update("MAX_LIMIT", bad) }
-            .isInstanceOf(AttributeValidationException::class.java)
-            .hasMessageContaining("Invalid regex pattern")
-        verify(repository, never()).save(any())
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            val bad = AttributeMasterDto(displayName = "X", dataType = DataType.STRING, regexPattern = "(unclosed")
+            assertThatThrownBy { runBlocking { service.update("MAX_LIMIT", bad) } }
+                .isInstanceOf(AttributeValidationException::class.java)
+                .hasMessageContaining("Invalid regex pattern")
+            coVerify(exactly = 0) { repository.save(any()) }
+        }
     }
 
     @Test @DisplayName("Null version on update → entity version remains unchanged")
     fun update_nullVersionPreservesExistingVersion() {
-        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
-        whenever(repository.save(any<AttributeMaster>())).thenReturn(active)
-        val dto = AttributeMasterDto(displayName = "X", dataType = DataType.STRING, version = null)
-        service.update("MAX_LIMIT", dto)
-        assertThat(active.version).isEqualTo(1L)
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            val slot = slot<AttributeMaster>()
+            coEvery { repository.save(capture(slot)) } returns active
+            val dto = AttributeMasterDto(displayName = "X", dataType = DataType.STRING, version = null)
+            service.update("MAX_LIMIT", dto)
+            assertThat(slot.captured.version).isEqualTo(1L)
+        }
     }
 
     // ── softDelete ──────────────────────────────────────────
 
     @Test @DisplayName("Existing code → sets status ARCHIVED and saves")
     fun softDelete_archives() {
-        whenever(repository.findById("MAX_LIMIT")).thenReturn(Optional.of(active))
-        service.softDelete("MAX_LIMIT")
-        val cap = ArgumentCaptor.forClass(AttributeMaster::class.java)
-        verify(repository).save(cap.capture())
-        assertThat(cap.value.status).isEqualTo(AttributeStatus.ARCHIVED)
+        runBlocking {
+            coEvery { repository.findById("MAX_LIMIT") } returns active
+            val slot = slot<AttributeMaster>()
+            coEvery { repository.save(capture(slot)) } returns active
+            service.softDelete("MAX_LIMIT")
+            assertThat(slot.captured.status).isEqualTo(AttributeStatus.ARCHIVED)
+        }
     }
 
     @Test @DisplayName("Non-existent code on delete → throws ResourceNotFoundException")
     fun softDelete_notFound() {
-        whenever(repository.findById("GHOST")).thenReturn(Optional.empty())
-        assertThatThrownBy { service.softDelete("GHOST") }
-            .isInstanceOf(ResourceNotFoundException::class.java)
-            .hasMessageContaining("GHOST")
+        runBlocking {
+            coEvery { repository.findById("GHOST") } returns null
+            assertThatThrownBy { runBlocking { service.softDelete("GHOST") } }
+                .isInstanceOf(ResourceNotFoundException::class.java)
+                .hasMessageContaining("GHOST")
+        }
     }
 }

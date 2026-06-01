@@ -6,6 +6,8 @@ import com.example.kk.policyattribute.exception.ResourceNotFoundException
 import com.example.kk.policyattribute.model.AttributeGroup
 import com.example.kk.policyattribute.model.AttributeStatus
 import com.example.kk.policyattribute.repository.AttributeGroupRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -18,7 +20,7 @@ class AttributeGroupService(
      * Lists active attribute groups ordered by displayOrder.
      */
     @Transactional(readOnly = true)
-    fun listActiveGroups(): List<AttributeGroupDto> {
+    fun listActiveGroups(): Flow<AttributeGroupDto> {
         val groups = repository.findByStatusOrderByDisplayOrderAsc(AttributeStatus.ACTIVE)
         return groups.map { toDto(it) }
     }
@@ -27,7 +29,7 @@ class AttributeGroupService(
      * Lists attribute groups ordered by displayOrder, optionally including archived.
      */
     @Transactional(readOnly = true)
-    fun listGroups(includeArchived: Boolean): List<AttributeGroupDto> {
+    fun listGroups(includeArchived: Boolean): Flow<AttributeGroupDto> {
         val groups = if (includeArchived) {
             repository.findAllByOrderByDisplayOrderAsc()
         } else {
@@ -40,17 +42,20 @@ class AttributeGroupService(
      * Get a single group by code.
      */
     @Transactional(readOnly = true)
-    fun getByCode(code: String): AttributeGroupDto = toDto(findByCodeOrThrow(code))
+    suspend fun getByCode(code: String): AttributeGroupDto = toDto(findByCodeOrThrow(code))
 
     /**
      * Create a new attribute group.
      */
     @Transactional
-    fun create(dto: AttributeGroupDto): AttributeGroupDto {
+    suspend fun create(dto: AttributeGroupDto): AttributeGroupDto {
         if (repository.existsById(dto.code)) {
             throw AttributeValidationException("Group code '${dto.code}' already exists")
         }
-        val entity = toEntity(dto).apply { status = AttributeStatus.ACTIVE }
+        val entity = toEntity(dto).apply {
+            status = AttributeStatus.ACTIVE
+            setNew(true)
+        }
         return toDto(repository.save(entity))
     }
 
@@ -58,7 +63,7 @@ class AttributeGroupService(
      * Update an existing attribute group.
      */
     @Transactional
-    fun update(code: String, dto: AttributeGroupDto): AttributeGroupDto {
+    suspend fun update(code: String, dto: AttributeGroupDto): AttributeGroupDto {
         val existing = findByCodeOrThrow(code)
 
         existing.displayNameEn = dto.displayNameEn
@@ -76,7 +81,7 @@ class AttributeGroupService(
      * Soft-delete: set status to ARCHIVED.
      */
     @Transactional
-    fun softDelete(code: String) {
+    suspend fun softDelete(code: String) {
         val entity = findByCodeOrThrow(code)
         entity.status = AttributeStatus.ARCHIVED
         repository.save(entity)
@@ -84,9 +89,9 @@ class AttributeGroupService(
 
     // ── Private helpers ──────────────────────────────────────
 
-    private fun findByCodeOrThrow(code: String): AttributeGroup =
+    private suspend fun findByCodeOrThrow(code: String): AttributeGroup =
         repository.findById(code)
-            .orElseThrow { ResourceNotFoundException("AttributeGroup", code) }
+            ?: throw ResourceNotFoundException("AttributeGroup", code)
 
     /**
      * Helper to map Entity to DTO.
@@ -110,4 +115,3 @@ class AttributeGroupService(
         displayOrder = dto.displayOrder
     )
 }
-
