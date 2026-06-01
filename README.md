@@ -1,7 +1,7 @@
 # Policy Attribute Management System (PAMS)
 
 > A full-stack enterprise application for managing and mapping dynamic policy attributes.  
-> **Backend:** Spring Boot 4.0.6 (Kotlin 2.2.0, WebFlux, R2DBC, Coroutines, Gradle) | **Frontend:** React 19 (TypeScript, Vite, Tailwind CSS) | **Database:** PostgreSQL 16
+> **Backend:** Spring Boot 4.0.6 (Kotlin 2.2.0, WebFlux, R2DBC, Coroutines, Gradle) | **Frontend:** React 19 (TypeScript, Vite, Tailwind CSS) | **Database:** PostgreSQL 17
 
 ---
 
@@ -42,7 +42,7 @@ The **Policy Attribute Management System (PAMS)** is a high-density, enterprise-
 | **Persistence**| Spring Data R2DBC (Reactive Postgres) + Flyway Migrations       |
 | **Serialization** | Jackson 3 (`tools.jackson.module:jackson-module-kotlin`)     |
 | **Testing**    | MockK, SpringMockk 5.0.1, WebTestClient, JaCoCo ≥ 80%          |
-| **Database**   | PostgreSQL 16 (Alpine)                                          |
+| **Database**   | PostgreSQL 17 (Alpine)                                          |
 | **Frontend**   | React 19, TypeScript 6, Vite 6, Tailwind CSS 4                  |
 | **Routing**    | React Router DOM 7                                              |
 | **API Docs**   | SpringDoc OpenAPI / Swagger UI WebFlux (`/swagger-ui.html`)      |
@@ -240,7 +240,7 @@ graph TB
         PavRepo --> PavEntity
     end
 
-    subgraph DB["🗄️ PostgreSQL 16 (Port 5432)"]
+    subgraph DB["🗄️ PostgreSQL 17 (Port 5432)"]
         Tables["attribute_master<br/>policy_master<br/>policy_attribute_values"]
         Flyway["Flyway Migrations<br/>V1__create_schema.sql<br/>V2__insert_test_data.sql"]
     end
@@ -596,42 +596,59 @@ The `PolicyListPage` (`/policies`) serves as a read-only executive view that:
 
 ### Prerequisites
 
-- Java 21 JDK
-- Node.js 20+
+- Java 21 JDK (if running services natively)
+- Node.js 20+ (if running services natively)
 - Docker Desktop
 
-### Step 1 — Start Infrastructure
+There are two ways to run the project locally.
+
+### Option A: Run the Entire Stack via Docker Compose (Recommended)
+
+This option spins up containerized versions of the database, pgAdmin, the reactive backend, and the frontend web app.
 
 ```bash
-# From project root
-docker compose up -d
+# Start all containers in the background, building them if necessary
+docker compose up --build -d
 ```
 
-Starts:
-- **PostgreSQL 16** on `localhost:5432` (`pams_db` / `pams_user` / `pams_secret`)
-- **pgAdmin 4** on `http://localhost:5050` (`admin@pams.com` / `admin123`)
+This starts:
+- **Frontend App**: `http://localhost:5173` (served via Nginx and reverse-proxied to the backend)
+- **Backend API**: `http://localhost:8080` (API routes, `/swagger-ui.html` swagger docs)
+- **PostgreSQL 17**: `localhost:5432` (`pams_db` / `pams_user` / `pams_secret`)
+- **pgAdmin 4**: `http://localhost:5050` (`admin@pams.com` / `admin123`)
 
-### Step 2 — Run Backend
+> [!NOTE]
+> If you have an existing PostgreSQL database volume from an older container configuration (like PostgreSQL 16), PostgreSQL 17 may fail to start. You can clear the old volume by running:
+> ```bash
+> docker compose down -v
+> ```
 
+---
+
+### Option B: Run Services Locally for Development (Hot-Reload Mode)
+
+If you are developing the backend or frontend and need features like hot-reloading (Vite HMR or Gradle continuous compilation), you can run only the infrastructure in Docker and run the code natively:
+
+#### Step 1: Start Database and pgAdmin
+```bash
+docker compose up postgres pgadmin -d
+```
+
+#### Step 2: Run Backend
 ```bash
 cd backend
 ./gradlew bootRun
 ```
-
 - API server: `http://localhost:8080`
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
-- Flyway will automatically run all pending migrations on startup.
 
-### Step 3 — Run Frontend
-
+#### Step 3: Run Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-- Frontend: `http://localhost:5173`
-- Proxies API calls to `http://localhost:8080`
+- Frontend: `http://localhost:5173` (connects directly to port `8080` via CORS)
 
 ---
 
